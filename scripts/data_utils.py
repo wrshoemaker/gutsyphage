@@ -1,16 +1,46 @@
 
 import gzip
 import config
+import numpy
+from math import radians, cos, sin, asin, sqrt
+
+from collections import Counter
 
 
+from matplotlib import colors
+from matplotlib import cm
+import matplotlib as mpl
+
+# these repeated vOTUs are not an issue if you only use MGV lines
 repeated_votu_representative_all = ['vOTU-010833', 'vOTU-014541', 'vOTU-013486']
+# ignore 'Not-determined'
+checkv_quality_all = ['Complete', 'High-quality', 'Medium-quality', 'Low-quality']
+
+checkv_quality_score_dict = {'Low-quality':0, 'Medium-quality':1, 'High-quality':2, 'Complete':3}
+
 taxon_abbr_dict = {'d':'domain', 'p':'phylum', 'c':'class', 'o':'order', 'f':'family', 'g':'genus', 's':'species'}
 taxon_ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
 taxon_ranks = taxon_ranks[::-1]
 
 str_to_boolean_dict = {'Yes': True, 'No': False}
 
+
+
+def make_colormap(n_entries):
+    # some matplotlib tools
+    # taxonomic hierarchy colors
+    cmap_offset = int(0.2*16)
+    # +cmap_offset
+    rgb_red_ = cm.Blues(numpy.linspace(0,1,n_entries+5))
+    rgb_red_ = mpl.colors.ListedColormap(rgb_red_[cmap_offset:,:-1])
+
+    return rgb_red_
+
+
+
 def read_sample_metadata():
+
+    sample_metagenome_dict = {}
 
     with gzip.open('%smgv_sample_info.tsv.gz' % config.data_directory, 'rt') as f:
         header = f.readline()
@@ -29,10 +59,29 @@ def read_sample_metadata():
         # line[10] = health
         # line[11] = disease
 
-        #for line in f:
-        #    print(line)
+        for line in f:
+            line = line.strip().split('\t')
+
+            contig_id = line[0]
+            continent = line[6]
+            country_code = line[7]
+
+            health = line[10]
+            disease = line[11]
+
+            sample_metagenome_dict[contig_id] = {}
+            sample_metagenome_dict[contig_id]['continent'] = continent
+            sample_metagenome_dict[contig_id]['country_code'] = country_code
+            sample_metagenome_dict[contig_id]['health'] = health
+            sample_metagenome_dict[contig_id]['disease'] = disease
+
+            #sample_metagenome_dict[]
+
 
         f.close()
+
+    
+    return sample_metagenome_dict
 
 
 
@@ -115,9 +164,10 @@ def read_microbe_metadata(min_completeness=0.9, max_contamination=0.05):
 
 
 
-def read_phage_metadata(checkv_quality='High-quality', viral_confidence='Confident', viralverify_prediction='Virus', votu_representative=True):
+def read_phage_metadata(checkv_quality='High-quality', checkv_quality_cumulative=True, viral_confidence_criterion='Confident', viralverify_prediction_criterion='Virus', subset_votu_representative=False, checkv_completeness=0.9):
 
     sra_dict = {}
+    votu_dict = {}
 
     with gzip.open('%suhgv_metadata.tsv.gz' % config.data_directory, 'rt') as f:
         header = f.readline()
@@ -137,7 +187,7 @@ def read_phage_metadata(checkv_quality='High-quality', viral_confidence='Confide
         # line[11] = checkv_trimmed (Yes/No)
         # line[12] = viral_confidence (e.g., Confident)
         # line[13] = genomad_virus_score 
-        # line[14] = genomad_virus_hallmarks (?)
+        # line[14] = genomad_virus_hallmarks (represents if the detection method for the phages (genomad) found a phage hallmark gene (eg. capsid, terminase, etc.))
         # line[15] = genomad_plasmid_hallmarks (?)
         # line[16] = viralverify_prediction (e.g., Virus)
         # line[17] = viralverify_score (numeric)
@@ -149,7 +199,7 @@ def read_phage_metadata(checkv_quality='High-quality', viral_confidence='Confide
         # line[23] = genetic_code (numeric)
         # line[24] = is_recoded (Yes/No)
         # line[25] = trna_count_total
-        # line[26] = trna_count_suppressor
+        # line[26] = trna_count_suppressor (A suppressor tRNA is a tRNA with a mutation (usually) in the anticodon that allows it to recognize a stop codon and insert an amino acid in its place) 10.1128/JB.186.20.6714-6720.2004
         # line[27] = sra_run (e.g., ERR414592,ERR414311 or SRR5274010)
         # line[28] = sra_sample (e.g., ERS396364 or SRS1992821)
         # line[29] = biosample (e.g., SAMEA2338694)
@@ -160,42 +210,134 @@ def read_phage_metadata(checkv_quality='High-quality', viral_confidence='Confide
         for line in f:
             line = line.strip().split('\t')
 
-            if (line[8] != checkv_quality):
+            uhgv_votu = line[1]
+
+            original_study_alias = line[3]
+            original_id = line[4]
+            genome_length = line[5]
+
+            quality = line[8]
+            viral_confidence = line[12]
+            viralverify_prediction = line[16]
+            sra_sample = line[28]
+
+            country = line[30]
+            latitude = line[31]
+            longitude = line[32]
+
+
+
+
+            if quality == 'Not-determined':
                 continue
 
-            if (line[12] != viral_confidence):
-                continue
 
-            if (line[16] != viralverify_prediction):
+            checkv_quality_score = checkv_quality_score_dict[quality]
+
+
+
+            if checkv_quality_cumulative == True:
+                if checkv_quality_score < checkv_quality_score_dict[checkv_quality]:
+                    continue
+            else:
+                if (quality != checkv_quality):
+                    continue
+
+
+            if original_study_alias != 'MGV':
                 continue
             
-            # make sure it's representative
-            if str_to_boolean_dict[line[2]] != votu_representative:
+            if (viral_confidence != viral_confidence_criterion):
                 continue
+
+            if (viralverify_prediction != viralverify_prediction_criterion):
+                continue
+            
+            if subset_votu_representative == True:
+            # make sure it's representative
+                if str_to_boolean_dict[line[2]] != True:
+                    continue
 
             if line[28] == 'Null':
                 continue
 
-            sra_sample = line[28]
+
+            #checkv_completeness = float(line[9])/100
 
             if sra_sample not in sra_dict:
                 sra_dict[sra_sample] = {}
+                sra_dict[sra_sample]['latitude'] = latitude
+                sra_dict[sra_sample]['longitude'] = longitude
+                sra_dict[sra_sample]['country'] = country
+                sra_dict[sra_sample]['uhgv_votu_all'] = []
 
-            #if line[1] == 'vOTU-010833':
-            #    print(line)
+            sra_dict[sra_sample]['uhgv_votu_all'].append(uhgv_votu)
 
-            if line[1] not in sra_dict[sra_sample]:
+            if uhgv_votu not in votu_dict:
+                votu_dict[uhgv_votu] = {}
+                votu_dict[uhgv_votu]['sra'] = []
+                votu_dict[uhgv_votu]['genome_length'] = []
 
-                sra_dict[sra_sample][line[1]] = {}
-        
 
+            votu_dict[uhgv_votu]['sra'].append(sra_sample)
+            votu_dict[uhgv_votu]['genome_length'].append(genome_length)
+
+            #if line[1] not in sra_dict[sra_sample]:
+
+            #    sra_dict[sra_sample][line[1]] = {}
+
+    
         f.close()
 
 
-    return sra_dict
+    return votu_dict #, sra_dict
+
+
+
+def votu_dict_to_s_by_s(phage_metadata_dict):
+
+    #uhgv_votu 
+
+    print('t')
+
+    print({k:Counter(v['sra']) for k, v in phage_metadata_dict.items()}) 
 
 
 
 
+def make_survival_dist(data, range_, probability=True):
+
+
+    data = data[numpy.isfinite(data)]
+    survival_array = [sum(data>=i) for i in range_]
+    #survival_array = [sum(data>=i)/len(data) for i in range_]
+    survival_array = numpy.asarray(survival_array)
+
+    if probability == True:
+        survival_array = survival_array/len(data)
+
+    return survival_array
+
+
+# estimated host range in uhgv_votus_metadata.tsv.gz
+
+
+
+
+def haversine(lon1, lat1, lon2, lat2):
+    """
+    Calculate the great circle distance in kilometers between two points 
+    on the earth (specified in decimal degrees)
+    """
+    # convert decimal degrees to radians 
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+
+    # haversine formula 
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a)) 
+    r = 6371 # Radius of earth in kilometers. Use 3956 for miles. Determines return value units.
+    return c * r
 
 

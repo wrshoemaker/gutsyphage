@@ -3,3 +3,5 @@ uhgg_genomes-nr_metadata.tsv.gz
 uhgv_metadata.tsv.gz
 uhgv_mgv.fna.gz
 .DS_Store
+data/uhgv_votus_metadata.tsv.gz
+data/mgv_contig_info.tsv.gz
