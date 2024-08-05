@@ -224,10 +224,13 @@ def read_microbe_metadata(min_completeness=0.9, max_contamination=0.05):
 
 
 
-def read_uhgv_metadata(checkv_quality='High-quality', checkv_quality_cumulative=True, viral_confidence_criterion='Confident', viralverify_prediction_criterion='Virus', subset_votu_representative=False, checkv_completeness=0.9):
+def read_uhgv_metadata(checkv_quality='High-quality', checkv_quality_cumulative=True, viral_confidence_criterion='Confident', viralverify_prediction_criterion='Virus', checkv_completeness=0.9):
 
-    sra_dict = {}
+    #  subset_votu_representative=False, 
+
+    #sra_dict = {}
     votu_dict = {}
+    vgenome_dict = {}
 
     with gzip.open('%suhgv_metadata.tsv.gz' % config.data_directory, 'rt') as f:
         header = f.readline()
@@ -278,6 +281,8 @@ def read_uhgv_metadata(checkv_quality='High-quality', checkv_quality_cumulative=
             genome_length = line[5]
 
             quality = line[8]
+            checkv_completeness = line[9]
+
             viral_confidence = line[12]
             viralverify_prediction = line[16]
             sra_sample = line[28]
@@ -289,10 +294,12 @@ def read_uhgv_metadata(checkv_quality='High-quality', checkv_quality_cumulative=
             if quality == 'Not-determined':
                 continue
 
-
+            if checkv_completeness == 'NULL':
+                continue
+            
+            checkv_completeness = float(checkv_completeness)/100
+            
             checkv_quality_score = checkv_quality_score_dict[quality]
-
-
 
             if checkv_quality_cumulative == True:
                 if checkv_quality_score < checkv_quality_score_dict[checkv_quality]:
@@ -311,10 +318,10 @@ def read_uhgv_metadata(checkv_quality='High-quality', checkv_quality_cumulative=
             if (viralverify_prediction != viralverify_prediction_criterion):
                 continue
             
-            if subset_votu_representative == True:
+            #if subset_votu_representative == True:
             # make sure it's representative
-                if str_to_boolean_dict[line[2]] != True:
-                    continue
+            #    if str_to_boolean_dict[line[2]] != True:
+            #        continue
 
             if line[28] == 'Null':
                 continue
@@ -322,38 +329,63 @@ def read_uhgv_metadata(checkv_quality='High-quality', checkv_quality_cumulative=
 
             #checkv_completeness = float(line[9])/100
 
-            if sra_sample not in sra_dict:
-                sra_dict[sra_sample] = {}
-                sra_dict[sra_sample]['latitude'] = latitude
-                sra_dict[sra_sample]['longitude'] = longitude
-                sra_dict[sra_sample]['country'] = country
-                sra_dict[sra_sample]['uhgv_votu_all'] = []
+            #if sra_sample not in sra_dict:
+            #    sra_dict[sra_sample] = {}
+            #    sra_dict[sra_sample]['latitude'] = latitude
+            #    sra_dict[sra_sample]['longitude'] = longitude
+            #    sra_dict[sra_sample]['country'] = country
+            #    sra_dict[sra_sample]['uhgv_votu_all'] = []
 
-            sra_dict[sra_sample]['uhgv_votu_all'].append(uhgv_votu)
+
+            #sra_dict[sra_sample]['uhgv_votu_all'].append(uhgv_votu)
 
             if uhgv_votu not in votu_dict:
                 votu_dict[uhgv_votu] = {}
-                votu_dict[uhgv_votu]['sra_sample'] = []
-                votu_dict[uhgv_votu]['genome_length'] = []
                 votu_dict[uhgv_votu]['uhgv_genome'] = []
+                votu_dict[uhgv_votu]['original_study_alias'] = []
                 votu_dict[uhgv_votu]['original_id'] = []
+                votu_dict[uhgv_votu]['genome_length'] = []
+                votu_dict[uhgv_votu]['quality'] = []
+                votu_dict[uhgv_votu]['checkv_completeness'] = []
+                votu_dict[uhgv_votu]['viral_confidence'] = []
+                votu_dict[uhgv_votu]['viralverify_prediction'] = []
+                votu_dict[uhgv_votu]['sra_sample'] = []
                 votu_dict[uhgv_votu]['country'] = []
 
-                
 
-            votu_dict[uhgv_votu]['sra_sample'].append(sra_sample)
-            votu_dict[uhgv_votu]['genome_length'].append(genome_length)
+                
             votu_dict[uhgv_votu]['uhgv_genome'].append(uhgv_genome)
+            votu_dict[uhgv_votu]['original_study_alias'].append(original_study_alias)
             votu_dict[uhgv_votu]['original_id'].append(original_id)
+            votu_dict[uhgv_votu]['genome_length'].append(genome_length)
+            votu_dict[uhgv_votu]['quality'].append(quality)
+            votu_dict[uhgv_votu]['checkv_completeness'].append(checkv_completeness)
+            votu_dict[uhgv_votu]['viral_confidence'].append(viral_confidence)
+            votu_dict[uhgv_votu]['viralverify_prediction'].append(viralverify_prediction)
+            votu_dict[uhgv_votu]['sra_sample'].append(sra_sample)
             votu_dict[uhgv_votu]['country'].append(country)
 
             #if line[1] not in sra_dict[sra_sample]:
+
+            # save everything for vgenome_dict
+
+            vgenome_dict[uhgv_genome] = {}
+            vgenome_dict[uhgv_genome]['uhgv_votu'] = uhgv_votu
+            vgenome_dict[uhgv_genome]['original_study_alias'] = original_study_alias
+            vgenome_dict[uhgv_genome]['original_id'] = original_id
+            vgenome_dict[uhgv_genome]['genome_length'] = genome_length
+            vgenome_dict[uhgv_genome]['quality'] = quality
+            vgenome_dict[uhgv_genome]['checkv_completeness'] = checkv_completeness
+            vgenome_dict[uhgv_genome]['viral_confidence'] = viral_confidence
+            vgenome_dict[uhgv_genome]['viralverify_prediction'] = viralverify_prediction
+            vgenome_dict[uhgv_genome]['sra_sample'] = sra_sample
+            vgenome_dict[uhgv_genome]['country'] = country
 
             #    sra_dict[sra_sample][line[1]] = {}
         f.close()
 
 
-    return votu_dict #, sra_dict
+    return votu_dict, vgenome_dict
 
 
 
@@ -362,6 +394,7 @@ def read_uhgv_votu_metadata():
     uhgv_genome_metadata_dict = {}
 
     # one line per genome AND vOTU
+    # representative genomes
     with gzip.open('%suhgv_votus_metadata.tsv.gz' % config.data_directory, 'rt') as f:
         
         header = f.readline()
@@ -467,7 +500,7 @@ def votu_dict_to_pres_abs(phage_metadata_dict):
     sample_names = votu_pres_abs.columns.values
     votu_names = votu_pres_abs.index.values
 
-    
+
 
     # samples are COLUMNS
     # vOTUs are ROWS
