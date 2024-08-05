@@ -5,3 +5,12 @@ uhgv_mgv.fna.gz
 .DS_Store
 data/uhgv_votus_metadata.tsv.gz
 data/mgv_contig_info.tsv.gz
+data/ncbi-blast-2.16.0+
+scripts/ncbi-blast-2.16.0+
+data/uhgv_mgv_blast_db/
+data/uhgv_mgv_blast_db.zip
+data/single_db/
+data/UHGV-1371714.fna
+data/test_blast
+data/test_blast_ani.txt
+data/test.fna
