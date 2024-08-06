@@ -623,6 +623,42 @@ def haversine(lon1, lat1, lon2, lat2):
     return c * r
 
 
+def build_votu_fasta(votu='vOTU-000085'):
+
+    uhgv_votu_metadata_dict, uhgv_genome_metadata_dict = read_uhgv_metadata(checkv_quality='Complete', checkv_quality_cumulative=True)
+    
+    target_genome_all = uhgv_votu_metadata_dict[votu]['uhgv_genome']
+
+
+    #fasta_all_genomes = classFASTA('%suhgv_mgv.fna.gz' % config.data_directory).readFASTA()
+
+    fasta_file_path = '%s%s.fna' % (config.data_directory, votu) 
+    fasta_file_open = open(fasta_file_path, 'w')
+
+    with gzip.open('%suhgv_mgv.fna.gz' % config.data_directory, "rt") as handle:
+        for record in SeqIO.parse(handle, "fasta"):
+
+            if record.id in target_genome_all:
+
+                fasta_file_open.write('>%s\n' % record.id)
+
+                clean_sites_seq_split = [record.seq[i:i+n_fna_characters] for i in range(0, len(record.seq), n_fna_characters)]
+
+                for seq in clean_sites_seq_split:
+                    fasta_file_open.write('%s\n' % seq)
+
+                fasta_file_open.write('\n')
+
+
+
+    fasta_file_open.close()
+
+
+
+
+#build_votu_fasta()
+
+
 
 def blast(input_fasta_filename, allowed_contigs, output_directory, single_file=True, max_n=100):
 
