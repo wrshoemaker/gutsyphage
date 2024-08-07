@@ -113,6 +113,10 @@ def plot_block_diversity():
     plt.close()
 
 
-plot_block_diversity()
+
+#def plot_pairwise_blocks():
+
+
+#plot_block_diversity()
 
 #print(pangraph_data['blocks'][0]['mutate'])

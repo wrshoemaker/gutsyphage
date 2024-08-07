@@ -436,6 +436,9 @@ def read_uhgv_votu_metadata():
             uhgv_genome_metadata_dict[uhgv_votu]['cds_count'] = cds_count
             uhgv_genome_metadata_dict[uhgv_votu]['lifestyle'] = lifestyle
 
+            #if lifestyle not in lifestyle_all:
+            #    print(lifestyle)
+
             ictv_taxonomy_split = line[7].split(';')
             uhgv_taxonomy_split = line[8].split(';')
             host_lineage = line[9]
@@ -735,5 +738,46 @@ class classFASTA:
         '''Returns fasa as nested list, containing line identifier \
             and sequence'''
         return fasta_list
+    
+
+
+def get_top_n_votus(n_votus_per_lifestyle=20):
+
+    uhgv_votu_metadata_dict = read_uhgv_votu_metadata()
+
+    # get phage presence/absence dictionary
+    votu_dict, vgenome_dict = read_uhgv_metadata(checkv_quality='Complete', checkv_quality_cumulative=True)
+    # build the presence/absence matrix
+    votu_pres_abs_array, votu_names, sample_names = votu_dict_to_pres_abs(votu_dict)
+    # get country IDs from mgv_sample_info.tsv.gz using sample_accession
+    #sample_metagenome_dict = read_sample_metadata()
+
+    lifestyle_votu_all = numpy.asarray([uhgv_votu_metadata_dict[v]['lifestyle'] for v in votu_names])
+
+    file_path = '%stop_%s_votus_per_lifestyle.csv' % (config.data_directory, n_votus_per_lifestyle) 
+    file_open = open(file_path, 'w')
+    file_open.write('lifestyle,votu,n_genomes\n')
+
+    for l in lifestyle_all:
+
+        votu_names_l = votu_names[lifestyle_votu_all==l]
+
+        n_genomes_l = numpy.asarray([len(votu_dict[i]['original_id']) for i in votu_names_l] )
+
+        n_genomes_l_argsort_idx = numpy.argsort(n_genomes_l)
+
+        votu_names_l = votu_names_l[n_genomes_l_argsort_idx][::-1]
+        n_genomes_l = n_genomes_l[n_genomes_l_argsort_idx][::-1]
+
+        for k in range(n_votus_per_lifestyle):
+            file_open.write('%s,%s,%d\n' % (l, votu_names_l[k], n_genomes_l[k]))
+
+
+    file_open.close()
+
+
+
+
+#get_top_n_votus()
 
 
