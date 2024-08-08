@@ -42,7 +42,7 @@ phage_taxonomy_ranks_dict = {'ictv_taxonomy': ictv_taxonomy_ranks, 'uhgv_taxonom
 lifestyle_all = ['lytic', 'temperate']
 lifestyle_all_and_both = ['lytic', 'temperate', 'both']
 
-lifestyle_color_dict = {'both':'k', 'temperate':'dodgerblue', 'lytic':'#FF6347'}
+lifestyle_color_dict = {'both':'k', 'temperate':'#87CEEB', 'lytic':'#FF6347'}
 
 uhgv_taxonomy_name_no_cap_dict = {'otu':'vOTU', 'genus': 'genus', 'subfamily':'subfamily', 'family':'family'}
 str_to_boolean_dict = {'Yes': True, 'No': False}
