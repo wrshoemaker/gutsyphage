@@ -12,8 +12,6 @@ import random
 #from collections import Counter
 from itertools import combinations
 
-random.seed(123456789)
-
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
@@ -22,182 +20,9 @@ from matplotlib.lines import Line2D
 #divergence_dict_path = '%sdivergence_dict.pickle' % config.data_directory
 
 
-def load_pangraph_data(pangraph_file_path):
-
-    #pangraph_path = '%scomplete_minimap2/%s_complete_polished.json' % (config.data_directory, votu)
-    #pangraph_file = open(pangraph_path, 'r')
-    pangraph_file = open(pangraph_file_path, 'r')
-    pangraph_data = json.load(pangraph_file)
-    pangraph_file.close()
-
-    return pangraph_data
-
-
-def get_pangraph_genome_names(pangraph_data):
-
-    # all genome names
-    names_all = []
-    for i in pangraph_data['paths']:
-        names_i = [j['name'] for j in i['blocks']]
-        names_all.extend(names_i)
-
-    names_all = list(set(names_all))
-
-    return names_all
 
 
 
-
-
-def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_data, bin_n = 1000, calculate_binned_divergence=False):
-
-    # knit pangraph blocks together along the entire alignment
-
-    # dict items for ['paths']
-    # dict_keys(['name', 'offset', 'circular', 'position', 'blocks'])
-    block_id_final = []
-    block_position = []
-    cumulative_block_position = []
-    allele_all_1 = []
-    allele_all_2 = []
-
-    # get all the blocks THEN calculate distance so you can go across blocks..
-    cumulative_block_len = 0
-    cumulative_shared_block_len = 0
-
-    # the order of the blocks should be sorted
-    for block_i in pangraph_data['blocks']:
-
-        sequence_i = block_i['sequence']
-        len_sequence_i = len(sequence_i)
-
-        block_i_name_genomes = [i[0]['name'] for i in block_i['positions']]
-        # dict_keys(['id', 'sequence', 'gaps', 'mutate', 'insert', 'delete', 'positions'])
-        
-        if (genome_1 in block_i_name_genomes) and (genome_2 in block_i_name_genomes):
-
-            cumulative_shared_block_len += len_sequence_i
-
-            positions_i = block_i['positions']
-            
-            position_1_idx = block_i_name_genomes.index(genome_1)
-            position_2_idx = block_i_name_genomes.index(genome_2)
-
-            start_1, stop_1 = positions_i[position_1_idx][1]
-            start_2, stop_2 = positions_i[position_2_idx][1]
-
-            # always set orientation to true...
-            strand_1 = positions_i[position_1_idx][0]['strand']
-            strand_2 = positions_i[position_2_idx][0]['strand']
-
-            if (strand_1 == False):
-                stop_1, start_1 = start_1, stop_1
-
-            if (strand_2 == False):   
-                stop_2, start_2 = start_2, stop_2
-
-            
-            mutatate_1 = [k for k in block_i['mutate'] if k[0]['name'] == genome_1][0]
-            mutatate_2 = [k for k in block_i['mutate'] if k[0]['name'] == genome_2][0]
-
-            #block_i_id_genomes = [i[0]['name'] for i in block_i['positions']]
-            # get all sites shared between the two genomes within the block
-            shared_site_dict_i = {}
-
-            # get positions and alleles for each variant in genome_1
-            for mutatate_1_l in mutatate_1[1]:
-                mutatate_1_l_pos, mutatate_1_l_allele = mutatate_1_l
-
-                if mutatate_1[0]['strand'] == False:
-                    mutatate_1_l_pos = len_sequence_i - mutatate_1_l_pos
-
-                if mutatate_1_l_pos not in shared_site_dict_i:
-                    shared_site_dict_i[mutatate_1_l_pos] = {}
-
-                shared_site_dict_i[mutatate_1_l_pos]['genome_1'] = mutatate_1_l_allele
-
-
-            for mutatate_2_l in mutatate_2[1]:
-                mutatate_2_l_pos, mutatate_2_l_allele = mutatate_2_l
-
-                if mutatate_2[0]['strand'] == False:
-                    mutatate_2_l_pos = len_sequence_i - mutatate_2_l_pos
-
-
-                if mutatate_2_l_pos not in shared_site_dict_i:
-                    shared_site_dict_i[mutatate_2_l_pos] = {}
-
-                shared_site_dict_i[mutatate_2_l_pos]['genome_2'] = mutatate_2_l_allele
-
-            # reverse order.
-            sequence_i_1 = copy.copy(sequence_i)
-            sequence_i_2 = copy.copy(sequence_i)
-            if mutatate_1[0]['strand'] == False:
-                sequence_i_1 = sequence_i_1[::-1]
-        
-            if mutatate_2[0]['strand'] == False:
-                sequence_i_2 = sequence_i_2[::-1]
-
-            # go back through and identify alleles
-            for pos_k, allele_dict_k in shared_site_dict_i.items():
-
-                # positions in genome start counting at one
-                if 'genome_1' not in allele_dict_k:
-                    allele_1 = sequence_i_1[pos_k-1]
-                else:
-                    allele_1 = allele_dict_k['genome_1']
-
-
-                if 'genome_2' not in allele_dict_k:
-                    allele_2 = sequence_i_2[pos_k-1]
-                else:
-                    allele_2 = allele_dict_k['genome_2']
-
-                if allele_1 == allele_2:
-                    continue
-                
-                block_id_final.append(block_i['id'])
-                block_position.append(pos_k)
-                cumulative_block_position.append(cumulative_block_len + pos_k)
-                allele_all_1.append(allele_1)
-                allele_all_2.append(allele_2)
-
-            
-
-
-        cumulative_block_len += len_sequence_i
-
-
-    block_id_final = numpy.asarray(block_id_final)
-    block_position = numpy.asarray(block_position)
-    cumulative_block_position = numpy.asarray(cumulative_block_position)
-    allele_all_1 = numpy.asarray(allele_all_1)
-    allele_all_2 = numpy.asarray(allele_all_2)
-
-    if calculate_binned_divergence == True:
-
-        all_bins = list(range(0, cumulative_block_len-1, bin_n))
-        all_bins.append(cumulative_block_len)
-
-        all_bins = numpy.asarray(all_bins)
-
-        binned_divergence = numpy.asarray([sum((cumulative_block_position >= all_bins[i]) & (cumulative_block_position < all_bins[i+1])) for i in range(len(all_bins)-1)])
-        binned_divergence = binned_divergence/bin_n
-
-    else:
-        all_bins = None
-        binned_divergence = None
-
-    # calculate fraction of shared blocks 
-    len_fraction_shared_blocks = cumulative_shared_block_len/cumulative_block_len
-
-    if cumulative_shared_block_len == 0:
-        total_divergence = None
-    else: 
-        total_divergence = len(cumulative_block_position)/cumulative_shared_block_len
-
-
-    return all_bins, binned_divergence, total_divergence, len_fraction_shared_blocks
 
 
 
@@ -212,20 +37,14 @@ def calculate_divergence_all_votus(n_genomes_subsample=6):
         # checking if it is a file
         if os.path.isfile(f):
 
-            pangraph_data = load_pangraph_data(f)
-            pangraph_genome_names = get_pangraph_genome_names(pangraph_data)
+            pangraph_data = data_utils.load_pangraph_data(f)
+            pangraph_genome_names = data_utils.get_pangraph_genome_names(pangraph_data)
             pangraph_genome_names.sort()
-
-            #pangraph_genome_names_subsample = random.sample(pangraph_genome_names, n_genomes_subsample)
-            #pangraph_genome_names_subsample.sort()
 
             genome_pair_all = list(combinations(pangraph_genome_names,2))
 
             votu = filename.split('/')[-1].split('.')[0].split('_')[0]
 
-
-            #if votu != 'vOTU-000017':
-            #    continue
 
             print(votu, len(pangraph_genome_names))
             div_dict_path = '%s%s.pickle' % (dict_directory, votu)
@@ -233,9 +52,7 @@ def calculate_divergence_all_votus(n_genomes_subsample=6):
             div_dict = {}
             for genome_pair in genome_pair_all:
 
-                #print(genome_pair)
-
-                bins, binned_divergence, total_divergence, len_fraction_shared_blocks = calculate_divergence_across_pangraph_blocks(genome_pair[0], genome_pair[1], pangraph_data, calculate_binned_divergence=False)
+                bins, binned_divergence, total_divergence, len_fraction_shared_blocks, len_fraction_shared_blocks_union = data_utils.calculate_divergence_across_pangraph_blocks(genome_pair[0], genome_pair[1], pangraph_data, calculate_binned_divergence=False)
 
                 if total_divergence == None:
                     continue
@@ -245,6 +62,7 @@ def calculate_divergence_all_votus(n_genomes_subsample=6):
                 #div_dict[genome_pair]['binned_divergence'] = binned_divergence.tolist()
                 div_dict[genome_pair]['total_divergence'] = total_divergence
                 div_dict[genome_pair]['len_fraction_shared_blocks'] = len_fraction_shared_blocks
+                div_dict[genome_pair]['len_fraction_shared_blocks_union'] = len_fraction_shared_blocks_union
 
     
             sys.stderr.write("Saving dictionary...\n")
@@ -339,10 +157,6 @@ def plot_divergence_vs_shared_blocks():
         plt.close()
 
 
-
-def rand_jitter(arr):
-    stdev = 0.01 * (max(arr) - min(arr))
-    return arr + numpy.random.randn(len(arr)) * stdev
 
 
 def plot_shared_blocks_dist(min_len=0.05):
@@ -453,13 +267,13 @@ def plot_shared_blocks_dist(min_len=0.05):
 
 #plot_divergence_vs_shared_blocks()
 
-plot_shared_blocks_dist()
+#plot_shared_blocks_dist()
 
 
 
 
-#calculate_divergence_all_votus()
-
+calculate_divergence_all_votus()
+#plot_shared_blocks_dist()
 #
 
 

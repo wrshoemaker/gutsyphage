@@ -3,6 +3,9 @@ import gzip
 import config
 import os
 from math import radians, cos, sin, asin, sqrt
+import json
+import copy
+import random
 
 from collections import Counter
 
@@ -21,6 +24,30 @@ from Bio import SeqIO
 n_fna_characters = 80
 
 numpy.random.seed(123456789)
+random.seed(123456789)
+
+
+base_table = {'A':'T','T':'A','G':'C','C':'G'}
+
+codon_table = { 'GCT': 'A', 'GCC': 'A', 'GCA': 'A', 'GCG': 'A', 'CGT': 'R', 'CGC': 'R', 'CGA':'R',
+'CGG':'R', 'AGA':'R', 'AGG':'R', 'AAT':'N', 'AAC':'N', 'GAT':'D', 'GAC':'D', 'TGT':'C', 'TGC':'D', 'CAA':'Q', 'CAG':'Q', 'GAA':'E', 'GAG':'E', 'GGT':'G', 'GGC':'G', 'GGA':'G', 'GGG':'G', 'CAT':'H', 'CAC':'H', 'ATT':'I', 'ATC':'I', 'ATA':'I', 'TTA':'L', 'TTG':'L', 'CTT':'L', 'CTC':'L', 'CTA':'L', 'CTG':'L', 'AAA':'K', 'AAG':'K', 'ATG':'M', 'TTT':'F', 'TTC':'F', 'CCT':'P', 'CCC':'P', 'CCA':'P', 'CCG':'P', 'TCT':'S', 'TCC':'S', 'TCA':'S', 'TCG':'S', 'AGT':'S', 'AGC':'S', 'ACT':'T', 'ACC':'T', 'ACA':'T', 'ACG':'T', 'TGG':'W', 'TAT':'Y', 'TAC':'Y', 'GTT':'V', 'GTC':'V', 'GTA':'V', 'GTG':'V', 'TAA':'!', 'TGA':'!', 'TAG':'!' }
+
+
+# calculate number of synonymous opportunities for each codon
+codon_synonymous_opportunity_table = {}
+for codon in codon_table.keys():
+    codon_synonymous_opportunity_table[codon] = {}
+    for i in range(0,3):
+        codon_synonymous_opportunity_table[codon][i] = -1 # since G->G is by definition synonymous, but we don't want to count it
+        codon_list = list(codon)
+        for base in ['A','C','T','G']:
+            codon_list[i]=base
+            new_codon = "".join(codon_list)
+            if codon_table[codon]==codon_table[new_codon]:
+                # synonymous!
+                codon_synonymous_opportunity_table[codon][i] += 1
+
+
 
 
 # these repeated vOTUs are not an issue if you only use MGV lines
@@ -626,16 +653,14 @@ def haversine(lon1, lat1, lon2, lat2):
     return c * r
 
 
-def build_votu_fasta(votu='vOTU-000085'):
+def build_votu_fasta(votu='vOTU-000085', checkv_quality='Complete'):
 
-    uhgv_votu_metadata_dict, uhgv_genome_metadata_dict = read_uhgv_metadata(checkv_quality='Complete', checkv_quality_cumulative=True)
+    uhgv_votu_metadata_dict, uhgv_genome_metadata_dict = read_uhgv_metadata(checkv_quality=checkv_quality, checkv_quality_cumulative=True)
     
     target_genome_all = uhgv_votu_metadata_dict[votu]['uhgv_genome']
-
-
     #fasta_all_genomes = classFASTA('%suhgv_mgv.fna.gz' % config.data_directory).readFASTA()
 
-    fasta_file_path = '%s%s.fna' % (config.data_directory, votu) 
+    fasta_file_path = '%suhgv_mgv_otu_fna/%s.fna' % (config.data_directory, votu) 
     fasta_file_open = open(fasta_file_path, 'w')
 
     with gzip.open('%suhgv_mgv.fna.gz' % config.data_directory, "rt") as handle:
@@ -777,7 +802,205 @@ def get_top_n_votus(n_votus_per_lifestyle=20):
 
 
 
+def load_pangraph_data(pangraph_file_path):
 
-#get_top_n_votus()
+    #pangraph_path = '%scomplete_minimap2/%s_complete_polished.json' % (config.data_directory, votu)
+    #pangraph_file = open(pangraph_path, 'r')
+    pangraph_file = open(pangraph_file_path, 'r')
+    pangraph_data = json.load(pangraph_file)
+    pangraph_file.close()
+
+    return pangraph_data
+
+
+
+def get_pangraph_genome_names(pangraph_data):
+
+    # all genome names
+    names_all = []
+    for i in pangraph_data['paths']:
+        names_i = [j['name'] for j in i['blocks']]
+        names_all.extend(names_i)
+
+    names_all = list(set(names_all))
+
+    return names_all
+
+
+
+def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_data, bin_n = 1000, calculate_binned_divergence=False):
+
+    # knit pangraph blocks together along the entire alignment
+
+    # dict items for ['paths']
+    # dict_keys(['name', 'offset', 'circular', 'position', 'blocks'])
+    block_id_final = []
+    block_position = []
+    cumulative_block_position = []
+    allele_all_1 = []
+    allele_all_2 = []
+
+    # get all the blocks THEN calculate distance so you can go across blocks..
+    cumulative_block_len = 0
+    cumulative_shared_block_len = 0
+    cumulative_block_len_1 = 0
+    cumulative_block_len_2 = 0
+
+
+    # the order of the blocks should be sorted
+    for block_i in pangraph_data['blocks']:
+
+        sequence_i = block_i['sequence']
+        len_sequence_i = len(sequence_i)
+
+        block_i_name_genomes = [i[0]['name'] for i in block_i['positions']]
+        # dict_keys(['id', 'sequence', 'gaps', 'mutate', 'insert', 'delete', 'positions'])
+
+        if (genome_1 in block_i_name_genomes):
+            cumulative_block_len_1 += len_sequence_i
+
+        if (genome_2 in block_i_name_genomes):
+            cumulative_block_len_2 += len_sequence_i
+
+        
+        if (genome_1 in block_i_name_genomes) and (genome_2 in block_i_name_genomes):
+
+            cumulative_shared_block_len += len_sequence_i
+
+            positions_i = block_i['positions']
+            
+            position_1_idx = block_i_name_genomes.index(genome_1)
+            position_2_idx = block_i_name_genomes.index(genome_2)
+
+            start_1, stop_1 = positions_i[position_1_idx][1]
+            start_2, stop_2 = positions_i[position_2_idx][1]
+
+            # always set orientation to true...
+            strand_1 = positions_i[position_1_idx][0]['strand']
+            strand_2 = positions_i[position_2_idx][0]['strand']
+
+            if (strand_1 == False):
+                stop_1, start_1 = start_1, stop_1
+
+            if (strand_2 == False):   
+                stop_2, start_2 = start_2, stop_2
+
+            
+            mutatate_1 = [k for k in block_i['mutate'] if k[0]['name'] == genome_1][0]
+            mutatate_2 = [k for k in block_i['mutate'] if k[0]['name'] == genome_2][0]
+
+            #block_i_id_genomes = [i[0]['name'] for i in block_i['positions']]
+            # get all sites shared between the two genomes within the block
+            shared_site_dict_i = {}
+
+            # get positions and alleles for each variant in genome_1
+            for mutatate_1_l in mutatate_1[1]:
+                mutatate_1_l_pos, mutatate_1_l_allele = mutatate_1_l
+
+                if mutatate_1[0]['strand'] == False:
+                    mutatate_1_l_pos = len_sequence_i - mutatate_1_l_pos
+
+                if mutatate_1_l_pos not in shared_site_dict_i:
+                    shared_site_dict_i[mutatate_1_l_pos] = {}
+
+                shared_site_dict_i[mutatate_1_l_pos]['genome_1'] = mutatate_1_l_allele
+
+
+            for mutatate_2_l in mutatate_2[1]:
+                mutatate_2_l_pos, mutatate_2_l_allele = mutatate_2_l
+
+                if mutatate_2[0]['strand'] == False:
+                    mutatate_2_l_pos = len_sequence_i - mutatate_2_l_pos
+
+
+                if mutatate_2_l_pos not in shared_site_dict_i:
+                    shared_site_dict_i[mutatate_2_l_pos] = {}
+
+                shared_site_dict_i[mutatate_2_l_pos]['genome_2'] = mutatate_2_l_allele
+
+            # reverse order.
+            sequence_i_1 = copy.copy(sequence_i)
+            sequence_i_2 = copy.copy(sequence_i)
+            if mutatate_1[0]['strand'] == False:
+                sequence_i_1 = sequence_i_1[::-1]
+        
+            if mutatate_2[0]['strand'] == False:
+                sequence_i_2 = sequence_i_2[::-1]
+
+            # go back through and identify alleles
+            for pos_k, allele_dict_k in shared_site_dict_i.items():
+
+                # positions in genome start counting at one
+                if 'genome_1' not in allele_dict_k:
+                    allele_1 = sequence_i_1[pos_k-1]
+                else:
+                    allele_1 = allele_dict_k['genome_1']
+
+
+                if 'genome_2' not in allele_dict_k:
+                    allele_2 = sequence_i_2[pos_k-1]
+                else:
+                    allele_2 = allele_dict_k['genome_2']
+
+                if allele_1 == allele_2:
+                    continue
+                
+                block_id_final.append(block_i['id'])
+                block_position.append(pos_k)
+                cumulative_block_position.append(cumulative_block_len + pos_k)
+                allele_all_1.append(allele_1)
+                allele_all_2.append(allele_2)
+
+
+        cumulative_block_len += len_sequence_i
+
+
+    block_id_final = numpy.asarray(block_id_final)
+    block_position = numpy.asarray(block_position)
+    cumulative_block_position = numpy.asarray(cumulative_block_position)
+    allele_all_1 = numpy.asarray(allele_all_1)
+    allele_all_2 = numpy.asarray(allele_all_2)
+
+    if calculate_binned_divergence == True:
+
+        all_bins = list(range(0, cumulative_block_len-1, bin_n))
+        all_bins.append(cumulative_block_len)
+
+        all_bins = numpy.asarray(all_bins)
+
+        binned_divergence = numpy.asarray([sum((cumulative_block_position >= all_bins[i]) & (cumulative_block_position < all_bins[i+1])) for i in range(len(all_bins)-1)])
+        binned_divergence = binned_divergence/bin_n
+
+    else:
+        all_bins = None
+        binned_divergence = None
+
+    # calculate fraction of shared blocks 
+    len_fraction_shared_blocks = cumulative_shared_block_len/cumulative_block_len
+    len_fraction_shared_blocks_union = cumulative_shared_block_len/(cumulative_block_len_1 + cumulative_block_len_2)
+
+    if cumulative_shared_block_len == 0:
+        total_divergence = None
+    else: 
+        total_divergence = len(cumulative_block_position)/cumulative_shared_block_len
+
+
+    return all_bins, binned_divergence, total_divergence, len_fraction_shared_blocks, len_fraction_shared_blocks_union
+
+
+
+
+def calculate_reverse_complement_sequence(dna_sequence):
+    
+    return "".join(base_table[base] for base in dna_sequence[::-1])
+
+
+
+def rand_jitter(arr):
+    stdev = 0.01 * (max(arr) - min(arr))
+    return arr + numpy.random.randn(len(arr)) * stdev
+
+
+
 
 

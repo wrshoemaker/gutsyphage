@@ -16,3 +16,7 @@ data/test_blast_ani.txt
 data/test.fna
 data/shkoporov_2019_VLP_stool_vOTU_abundance.xlsx
 data/complete_minimap2/
+data/top40_all_proteins_norev_good.tbl.gz
+data/top40_all_metadata.tbl.gz
+data/uhgv_mgv_otu_fna/
+data/annotation_dict.pickle
