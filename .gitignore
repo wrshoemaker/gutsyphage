@@ -20,3 +20,5 @@ data/top40_all_proteins_norev_good.tbl.gz
 data/top40_all_metadata.tbl.gz
 data/uhgv_mgv_otu_fna/
 data/annotation_dict.pickle
+data/syn_sites_dict_all/
+data/syn_sites_dict_all/vOTU-000012.pickle

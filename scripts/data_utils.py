@@ -4,6 +4,8 @@ import config
 import os
 from math import radians, cos, sin, asin, sqrt
 import json
+import sys
+import pickle
 import copy
 import random
 
@@ -16,6 +18,9 @@ import pandas
 from matplotlib import colors
 from matplotlib import cm
 import matplotlib as mpl
+
+
+import pypangraph
 
 
 from Bio import SeqIO
@@ -32,6 +37,8 @@ base_table = {'A':'T','T':'A','G':'C','C':'G'}
 codon_table = { 'GCT': 'A', 'GCC': 'A', 'GCA': 'A', 'GCG': 'A', 'CGT': 'R', 'CGC': 'R', 'CGA':'R',
 'CGG':'R', 'AGA':'R', 'AGG':'R', 'AAT':'N', 'AAC':'N', 'GAT':'D', 'GAC':'D', 'TGT':'C', 'TGC':'D', 'CAA':'Q', 'CAG':'Q', 'GAA':'E', 'GAG':'E', 'GGT':'G', 'GGC':'G', 'GGA':'G', 'GGG':'G', 'CAT':'H', 'CAC':'H', 'ATT':'I', 'ATC':'I', 'ATA':'I', 'TTA':'L', 'TTG':'L', 'CTT':'L', 'CTC':'L', 'CTA':'L', 'CTG':'L', 'AAA':'K', 'AAG':'K', 'ATG':'M', 'TTT':'F', 'TTC':'F', 'CCT':'P', 'CCC':'P', 'CCA':'P', 'CCG':'P', 'TCT':'S', 'TCC':'S', 'TCA':'S', 'TCG':'S', 'AGT':'S', 'AGC':'S', 'ACT':'T', 'ACC':'T', 'ACA':'T', 'ACG':'T', 'TGG':'W', 'TAT':'Y', 'TAC':'Y', 'GTT':'V', 'GTC':'V', 'GTA':'V', 'GTG':'V', 'TAA':'!', 'TGA':'!', 'TAG':'!' }
 
+
+start_codons = ['TTG', 'CTG', 'ATT', 'ATC', 'ATA', 'ATG', 'GTG']
 
 # calculate number of synonymous opportunities for each codon
 codon_synonymous_opportunity_table = {}
@@ -75,6 +82,10 @@ uhgv_taxonomy_name_no_cap_dict = {'otu':'vOTU', 'genus': 'genus', 'subfamily':'s
 str_to_boolean_dict = {'Yes': True, 'No': False}
 country_code_dict = {'RUS': 'Russia', 'MNG':'Mongolia', 'FRA':'France', 'FIN':'Finland', 'AUT':'Austria', 'DEU': 'Denmark', 'GBR':'United Kingdom', 'EST':'Estonia', 'CAN':'Canada', 'PER':'Peru', 'ITA':'Italy', 'JPN':'Japan', 'FJI':'Fiji', 'BGD':'Bangladesh', 'SWE':'Sweeden', 'CHN':'China', 'KAZ':'Kazakistan', 'NLD':'Netherlands', 'ESP':'Spain', 'DNK':'Denmark', 'SLV':'El Salvador', 'ISR':'Israel', 'TZA':'Tanzania', 'USA': 'USA'}
 
+
+
+annotation_dict_path = '%sannotation_dict.pickle' % config.data_directory
+syn_sites_dict_path = config.data_directory + 'syn_sites_dict_all/%s.pickle' 
 
 
 
@@ -828,7 +839,7 @@ def get_pangraph_genome_names(pangraph_data):
 
 
 
-def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_data, bin_n = 1000, calculate_binned_divergence=False):
+def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_data, syn_sites_dict, bin_n = 1000, calculate_binned_divergence=False):
 
     # knit pangraph blocks together along the entire alignment
 
@@ -842,50 +853,62 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
 
     # get all the blocks THEN calculate distance so you can go across blocks..
     cumulative_block_len = 0
-    cumulative_shared_block_len = 0
-    cumulative_block_len_1 = 0
-    cumulative_block_len_2 = 0
+    cumulative_inter_block_len = 0
+    cumulative_union_block_len = 0
+
+    cumulative_block_len_syn = 0
+    cumulative_block_len_nonsyn = 0
+    cumulative_n_syn = 0
+    cumulative_n_nonsyn = 0
+
+    #if syn_sites_dict == None:
+    #    fourfold_status_1 = None
+    #    fourfold_status_2 = None
+
+    #else:
+    #    fourfold_status_1 = []
+    #    fourfold_status_2 = []    
 
 
     # the order of the blocks should be sorted
     for block_i in pangraph_data['blocks']:
-
+        
+        block_i_id = block_i['id']
         sequence_i = block_i['sequence']
+        # length of the block
         len_sequence_i = len(sequence_i)
 
         block_i_name_genomes = [i[0]['name'] for i in block_i['positions']]
         # dict_keys(['id', 'sequence', 'gaps', 'mutate', 'insert', 'delete', 'positions'])
 
-        if (genome_1 in block_i_name_genomes):
-            cumulative_block_len_1 += len_sequence_i
+        if (genome_1 in block_i_name_genomes) or (genome_1 in block_i_name_genomes):
+            cumulative_union_block_len += len_sequence_i
 
-        if (genome_2 in block_i_name_genomes):
-            cumulative_block_len_2 += len_sequence_i
-
+        #if (genome_2 in block_i_name_genomes):
+        #    cumulative_block_len_2 += len_sequence_i
         
         if (genome_1 in block_i_name_genomes) and (genome_2 in block_i_name_genomes):
 
-            cumulative_shared_block_len += len_sequence_i
+            cumulative_inter_block_len += len_sequence_i
 
-            positions_i = block_i['positions']
+            #positions_i = block_i['positions']
             
-            position_1_idx = block_i_name_genomes.index(genome_1)
-            position_2_idx = block_i_name_genomes.index(genome_2)
+            #position_1_idx = block_i_name_genomes.index(genome_1)
+            #position_2_idx = block_i_name_genomes.index(genome_2)
 
-            start_1, stop_1 = positions_i[position_1_idx][1]
-            start_2, stop_2 = positions_i[position_2_idx][1]
+            #start_1, stop_1 = positions_i[position_1_idx][1]
+            #start_2, stop_2 = positions_i[position_2_idx][1]
 
             # always set orientation to true...
-            strand_1 = positions_i[position_1_idx][0]['strand']
-            strand_2 = positions_i[position_2_idx][0]['strand']
+            #strand_1 = positions_i[position_1_idx][0]['strand']
+            #strand_2 = positions_i[position_2_idx][0]['strand']
 
-            if (strand_1 == False):
-                stop_1, start_1 = start_1, stop_1
+            #if (strand_1 == False):
+            #    stop_1, start_1 = start_1, stop_1
 
-            if (strand_2 == False):   
-                stop_2, start_2 = start_2, stop_2
+            #if (strand_2 == False):   
+            #    stop_2, start_2 = start_2, stop_2
 
-            
             mutatate_1 = [k for k in block_i['mutate'] if k[0]['name'] == genome_1][0]
             mutatate_2 = [k for k in block_i['mutate'] if k[0]['name'] == genome_2][0]
 
@@ -897,8 +920,12 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
             for mutatate_1_l in mutatate_1[1]:
                 mutatate_1_l_pos, mutatate_1_l_allele = mutatate_1_l
 
-                if mutatate_1[0]['strand'] == False:
-                    mutatate_1_l_pos = len_sequence_i - mutatate_1_l_pos
+                # the mutation position refers to the position in the block
+                # we should not need to use 'strand' because we have the block positions in syn_sites_dict
+                
+                #if mutatate_1[0]['strand'] == False:
+                #    continue
+                #    mutatate_1_l_pos = len_sequence_i - mutatate_1_l_pos
 
                 if mutatate_1_l_pos not in shared_site_dict_i:
                     shared_site_dict_i[mutatate_1_l_pos] = {}
@@ -909,8 +936,9 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
             for mutatate_2_l in mutatate_2[1]:
                 mutatate_2_l_pos, mutatate_2_l_allele = mutatate_2_l
 
-                if mutatate_2[0]['strand'] == False:
-                    mutatate_2_l_pos = len_sequence_i - mutatate_2_l_pos
+                #if mutatate_2[0]['strand'] == False:
+                #    continue
+                #    mutatate_2_l_pos = len_sequence_i - mutatate_2_l_pos
 
 
                 if mutatate_2_l_pos not in shared_site_dict_i:
@@ -918,38 +946,91 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
 
                 shared_site_dict_i[mutatate_2_l_pos]['genome_2'] = mutatate_2_l_allele
 
+
             # reverse order.
-            sequence_i_1 = copy.copy(sequence_i)
-            sequence_i_2 = copy.copy(sequence_i)
-            if mutatate_1[0]['strand'] == False:
-                sequence_i_1 = sequence_i_1[::-1]
+            #sequence_i_1 = copy.copy(sequence_i)
+            #sequence_i_2 = copy.copy(sequence_i)
+            #if mutatate_1[0]['strand'] == False:
+            #    sequence_i_1 = sequence_i_1[::-1]
         
-            if mutatate_2[0]['strand'] == False:
-                sequence_i_2 = sequence_i_2[::-1]
+            #if mutatate_2[0]['strand'] == False:
+            #    sequence_i_2 = sequence_i_2[::-1]
+
+
+            # identify fourfold status of the site in each genome
+            
+            examine_syn_block = False
+            if syn_sites_dict != None: # annotation dict exists
+                if syn_sites_dict[block_i_id]['keep_block'] == True: # blocks that mapped to the fasta
+                    # make sure genome_1 and genome_2 have genes in this same block
+                    if (genome_1 in syn_sites_dict[block_i_id]['data']['genomes']) and (genome_2 in syn_sites_dict[block_i_id]['data']['genomes']):
+
+                        mutate_block_position_1 = syn_sites_dict[block_i_id]['data']['genomes'][genome_1]['site_block_position']
+                        mutate_block_position_2 = syn_sites_dict[block_i_id]['data']['genomes'][genome_2]['site_block_position']
+                        mutate_syn_status_1 = syn_sites_dict[block_i_id]['data']['genomes'][genome_1]['site_syn_status']
+                        mutate_syn_status_2 = syn_sites_dict[block_i_id]['data']['genomes'][genome_2]['site_syn_status']
+
+                        # find CDS sites shared by genomes in the block
+                        mutate_block_position_inter = numpy.intersect1d(mutate_block_position_1, mutate_block_position_2)
+                        mutate_syn_status_1_inter = numpy.asarray([mutate_syn_status_1[numpy.where(mutate_block_position_1 == x)[0][0]] for x in mutate_block_position_inter])
+                        mutate_syn_status_2_inter = numpy.asarray([mutate_syn_status_2[numpy.where(mutate_block_position_2 == x)[0][0]] for x in mutate_block_position_inter])
+
+                        # calculate subset of sites that have the same (non)syn status in both of the genomes
+                        nonsyn_idx = (mutate_syn_status_1_inter == 0) & (mutate_syn_status_2_inter == 0)
+                        syn_idx = (mutate_syn_status_1_inter == 3) & (mutate_syn_status_2_inter == 3)
+
+                        mutate_block_position_inter_nonsyn = mutate_block_position_inter[nonsyn_idx]
+                        mutate_block_position_inter_syn = mutate_block_position_inter[syn_idx]
+
+                        cumulative_block_len_nonsyn += sum(nonsyn_idx)
+                        cumulative_block_len_syn += sum(syn_idx)
+
+                        examine_syn_block = True
+
+
+
 
             # go back through and identify alleles
+            # pos_k = position in the block
             for pos_k, allele_dict_k in shared_site_dict_i.items():
 
                 # positions in genome start counting at one
-                if 'genome_1' not in allele_dict_k:
-                    allele_1 = sequence_i_1[pos_k-1]
-                else:
-                    allele_1 = allele_dict_k['genome_1']
+                #if 'genome_1' not in allele_dict_k:
+                #    allele_1 = sequence_i_1[pos_k-1]
+                #else:
+                #    allele_1 = allele_dict_k['genome_1']
 
 
-                if 'genome_2' not in allele_dict_k:
-                    allele_2 = sequence_i_2[pos_k-1]
-                else:
-                    allele_2 = allele_dict_k['genome_2']
+                #if 'genome_2' not in allele_dict_k:
+                #    allele_2 = sequence_i_2[pos_k-1]
+                #else:
+                #    allele_2 = allele_dict_k['genome_2']
 
-                if allele_1 == allele_2:
-                    continue
+                # same allele, do not count towards divergence
+                if ('genome_1' in allele_dict_k) and ('genome_2' in allele_dict_k):
+                    
+                    # same allele, do not count towards divergence
+                    if allele_dict_k['genome_1'] == allele_dict_k['genome_2']:
+                        continue
+
+                    # otherwise they have different alleles, which counts as divergence between that pair
+                
+                #if allele_1 == allele_2:
+                #    continue
                 
                 block_id_final.append(block_i['id'])
                 block_position.append(pos_k)
                 cumulative_block_position.append(cumulative_block_len + pos_k)
-                allele_all_1.append(allele_1)
-                allele_all_2.append(allele_2)
+                #allele_all_1.append(allele_1)
+                #allele_all_2.append(allele_2)
+
+                if examine_syn_block == True:
+
+                    if pos_k in mutate_block_position_inter_nonsyn:
+                        cumulative_n_nonsyn += 1
+
+                    if pos_k in mutate_block_position_inter_syn:
+                        cumulative_n_syn += 1
 
 
         cumulative_block_len += len_sequence_i
@@ -958,8 +1039,8 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
     block_id_final = numpy.asarray(block_id_final)
     block_position = numpy.asarray(block_position)
     cumulative_block_position = numpy.asarray(cumulative_block_position)
-    allele_all_1 = numpy.asarray(allele_all_1)
-    allele_all_2 = numpy.asarray(allele_all_2)
+    #allele_all_1 = numpy.asarray(allele_all_1)
+    #allele_all_2 = numpy.asarray(allele_all_2)
 
     if calculate_binned_divergence == True:
 
@@ -976,16 +1057,32 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
         binned_divergence = None
 
     # calculate fraction of shared blocks 
-    len_fraction_shared_blocks = cumulative_shared_block_len/cumulative_block_len
-    len_fraction_shared_blocks_union = cumulative_shared_block_len/(cumulative_block_len_1 + cumulative_block_len_2)
+    len_fraction_shared_blocks = cumulative_inter_block_len/cumulative_block_len
+    len_fraction_shared_blocks_union = cumulative_inter_block_len/(cumulative_union_block_len)
 
-    if cumulative_shared_block_len == 0:
+    #if syn_sites_dict != None:
+        #total_divergence_nonsyn = cumulative_n_nonsyn/cumulative_block_len_nonsyn
+        #total_divergence_syn = cumulative_n_syn/cumulative_block_len_syn
+        
+    #else:
+    if syn_sites_dict == None:
+        #total_divergence_nonsyn = None
+        #total_divergence_syn = None
+        cumulative_n_nonsyn = None
+        cumulative_n_syn = None
+        cumulative_block_len_nonsyn = None
+        cumulative_block_len_syn = None
+
+
+    if cumulative_inter_block_len == 0:
         total_divergence = None
     else: 
-        total_divergence = len(cumulative_block_position)/cumulative_shared_block_len
+        total_divergence = len(cumulative_block_position)/cumulative_inter_block_len
 
 
-    return all_bins, binned_divergence, total_divergence, len_fraction_shared_blocks, len_fraction_shared_blocks_union
+
+
+    return all_bins, binned_divergence, total_divergence, cumulative_n_nonsyn, cumulative_n_syn, cumulative_block_len_nonsyn, cumulative_block_len_syn, len_fraction_shared_blocks, len_fraction_shared_blocks_union
 
 
 
@@ -1001,6 +1098,324 @@ def rand_jitter(arr):
     return arr + numpy.random.randn(len(arr)) * stdev
 
 
+
+
+
+def parse_annotation_table():
+
+    #annotation_table_path = '%stop40_all_metadata.tbl.gz' % config.data_directory
+    #annotation_table_file = open(annotation_table_path, 'r')
+    #annotation_table_file = gzip.open('%stop40_all_metadata.tbl.gz' % config.data_directory, "rt")
+    annotation_table_file = gzip.open('%stop40_all_proteins_norev_good.tbl.gz' % config.data_directory, "rt")
+
+
+    #header = annotation_table_file.readline()
+    annotation_dict = {}
+    for line in annotation_table_file:
+        line = line.strip()
+
+        if '>' in line:
+            genome = line.split(' ')[-1]
+            #genome = line.split('\t')[-1]
+            annotation_dict[genome] = {}
+            annotation_dict[genome]['start_all'] = []
+            annotation_dict[genome]['stop_all'] = []
+            annotation_dict[genome]['type_all'] = []
+            
+            annotation_dict[genome]['product_all'] = []
+            annotation_dict[genome]['locus_tag_all'] = []
+            annotation_dict[genome]['transl_table_all'] = []
+
+        else:
+            line_split = line.split('\t')
+
+            if 'CDS' in line_split:
+                annotation_dict[genome]['start_all'].append(int(line_split[0]))
+                annotation_dict[genome]['stop_all'].append(int(line_split[1]))
+                annotation_dict[genome]['type_all'].append(line_split[2])
+
+            if 'product' in line_split:
+                annotation_dict[genome]['product_all'].append(line_split[1])
+
+            if 'locus_tag' in line_split:
+                annotation_dict[genome]['locus_tag_all'].append(line_split[1])
+
+            if 'transl_table' in line_split:
+                annotation_dict[genome]['transl_table_all'].append(int(line_split[1]))
+
+
+    # save dictionary
+    sys.stderr.write("Saving dictionary...\n")
+    with open(annotation_dict_path, 'wb') as handle:
+        pickle.dump(annotation_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    sys.stderr.write("Done!\n")
+
+
+
+
+
+def make_syn_sites_votu_dict(votu):
+    
+    # annotation dict is of all genomes
+    annotation_dict = pickle.load(open(annotation_dict_path, "rb"))
+
+    #start_codons
+
+    # all translation code 11
+    #for key in annotation_dict.keys():
+    #    if set(annotation_dict[key]['transl_table_all']) != {11}:
+    #        print(set(annotation_dict[key]['transl_table_all']))
+
+    sys.stderr.write("Identifying fourfold status of mutations in %s....\n" % votu)
+
+    # get fasta files for the votu
+    fasta_all_genomes = classFASTA('%suhgv_mgv_otu_fna/%s.fna' % (config.data_directory, votu)).readFASTA()
+    fasta_genome_dict = {x[0]:x[1] for x in fasta_all_genomes}
+
+    # get fasta files for the votu
+    pangraph_file_path = '%scomplete_minimap2/%s_complete_polished.json' % (config.data_directory, votu)
+    pangraph_votu = load_pangraph_data(pangraph_file_path)
+    pan = pypangraph.Pangraph.load_json(pangraph_file_path)
+    loc = pypangraph.Locator(pan)
+
+    genomes_to_examine = list(set(fasta_genome_dict.keys()) & set(annotation_dict.keys()))
+
+    start_stop_genome_dict = {}
+    # numpy arrays for ease
+    for genome_ in genomes_to_examine:
+
+        #if genome_ == 'UHGV-1363520':
+        #    continue
+        #print(genome_)
+
+        start_stop_genome_dict[genome_] = {}
+        start_all = numpy.asarray(annotation_dict[genome_]['start_all'])
+        stop_all = numpy.asarray(annotation_dict[genome_]['stop_all'])
+        
+        start_stop_matrix = numpy.vstack((start_all, stop_all))
+        max_position_over_genes = numpy.max(start_stop_matrix, axis=0)
+        min_position_over_genes = numpy.min(start_stop_matrix, axis=0)
+        
+        start_stop_genome_dict[genome_]['start_all'] = start_all
+        start_stop_genome_dict[genome_]['stop_all'] = stop_all
+        start_stop_genome_dict[genome_]['max_position_over_genes'] = max_position_over_genes
+        start_stop_genome_dict[genome_]['min_position_over_genes'] = min_position_over_genes
+
+
+    syn_sites_dict = {}
+    #syn_sites_dict['data'] = {}
+    # loop through blocks
+    for block_i in pangraph_votu['blocks']:
+
+        block_i_id = block_i['id']
+
+        if block_i_id not in syn_sites_dict:   
+            syn_sites_dict[block_i_id] = {}
+            syn_sites_dict[block_i_id]['data'] = {}
+            syn_sites_dict[block_i_id]['keep_block'] = True
+
+        
+        block_i_mutate = block_i['mutate']
+
+        bl = pan.blocks[block_i_id]
+        aln = bl.alignment
+        sequences, occurrences = aln.generate_sequences()
+        occurrences_genome_names = [x[0] for x in occurrences]
+
+        # looping through genomes
+        syn_sites_dict[block_i_id]['data']['genomes'] = {}
+        for j in range(0, len(block_i['positions'])):
+            
+            positions_i_j = block_i['positions'][j]
+            genome_name_i_j = positions_i_j[0]['name']
+
+            #if genome_name_i_j in genomes_to_ignore:
+            #    continue
+
+            # strand refers to the orientation of the fragment of genome j that has block_i
+            strand_i_j = positions_i_j[0]['strand']
+            # positions refer to the positions of the block in the FASTA file
+            min_position_i_j, max_position_i_j = positions_i_j[1]
+
+            start_all_j = start_stop_genome_dict[genome_name_i_j]['start_all']
+            stop_all_j = start_stop_genome_dict[genome_name_i_j]['stop_all']
+            max_position_over_genes_j = start_stop_genome_dict[genome_name_i_j]['max_position_over_genes']
+            min_position_over_genes_j = start_stop_genome_dict[genome_name_i_j]['min_position_over_genes']
+            fasta_genome_j = fasta_genome_dict[genome_name_i_j]
+
+            # returns the sequence of the block for the genome with insertions and deletions added
+            # all items in sequences are ordered with respect to the block sequence
+            # AKA the reverse complement has not been calculated
+            block_sequence_j = sequences[occurrences_genome_names.index(genome_name_i_j)]
+
+            # reverse complement
+            # this sequence should match its sequence in the fasta file
+            if strand_i_j == False:
+                block_sequence_j = calculate_reverse_complement_sequence(block_sequence_j)
+
+
+            if max_position_i_j > min_position_i_j:
+                len_position_i_j = max_position_i_j - min_position_i_j + 1
+            else:
+                len_position_i_j = (len(fasta_genome_j) - min_position_i_j) + max_position_i_j + 1
+
+
+            if (len_position_i_j !=  len(block_sequence_j)):
+                #print('Reconstituted sequence not equal to positions!')
+                #sys.stderr.write("Reconstituted sequence not equal to positions!\n")
+                # ignore block if we cant examine it in a single genome
+                syn_sites_dict[block_i_id]['keep_block'] = False
+                continue
+
+
+            block_i_mutate_genome_j = [x[1] for x in block_i_mutate if x[0]['name'] == genome_name_i_j][0]
+
+            # no mutations
+            if len(block_i_mutate_genome_j) == 0:
+                syn_sites_dict[block_i_id]['keep_block'] = False
+                continue
+
+
+            # If the block wraps circular we do two searches
+            # The one at the end of molecule, and the second at the beginning of molecule
+            # when min_position_i_j > max_position_i_j the block goes from the end of the fasta to the beginning
+            # we are only looking at **complete** genes within a fragment
+            if (min_position_i_j > max_position_i_j):
+                
+                #new_max_position = max(stop_all)
+                new_max_position = len(fasta_genome_j)
+                # counting starts at one for gene positions
+                new_min_position = 1
+
+                # get genes from min_position_i_j to end of genomes
+                genes_1_idx = (max_position_over_genes_j <= new_max_position) & (min_position_over_genes_j >= min_position_i_j)
+                genes_2_idx = (max_position_over_genes_j <= max_position_i_j) & (min_position_over_genes_j >= new_min_position)
+                idx_to_keep = (genes_1_idx | genes_2_idx)
+
+
+            else:
+                # Identify genes are contained by the block
+                idx_to_keep = (max_position_over_genes_j <= max_position_i_j) & (min_position_over_genes_j >= min_position_i_j)
+            
+
+            min_position_to_keep = start_all_j[idx_to_keep]
+            max_position_to_keep = stop_all_j[idx_to_keep]
+
+            # skip if there are no genes in this block for this genome
+            if (len(min_position_to_keep) == 0):
+                continue
+            
+            # we have the positions of the genes in this block for this genome.
+            # find the positions of the synonymous sites            
+            # loop through genes in the chunk
+            sites_synon_status_all = []
+            sites_position_in_fasta_all = []
+            for gene_g_idx in range(len(min_position_to_keep)):
+
+                min_position_g = min_position_to_keep[gene_g_idx]
+                max_position_g = max_position_to_keep[gene_g_idx]
+
+                # get sequence from fasta
+                # reverse complement
+                if min_position_g > max_position_g:
+                    # check this with real annotated genomes
+                    seq_g = fasta_genome_j[max_position_g-1:min_position_g]
+                    # reorient sequence
+                    gene_sequence_g = calculate_reverse_complement_sequence(seq_g)
+                    # swap order
+                    min_position_g, max_position_g = max_position_g, min_position_g
+
+
+                else:
+                    # gene positions start counting at one
+                    # index at zero for python
+                    gene_sequence_g = fasta_genome_j[min_position_g-1:max_position_g]
+
+                    #if gene_sequence_g[:3] in start_codons:
+                    #    print(True)
+                    #else:
+                    #    print(False)
+
+
+                # loop among positions within the gene
+                for position_in_gene in list( range(len(gene_sequence_g))): #calculate codon start
+                    # start position of codon
+                    codon_start = int((position_in_gene)/3)*3
+                    codon = gene_sequence_g[codon_start:codon_start+3] 
+                    position_in_codon = position_in_gene%3
+                    
+                    #data_utils.codon_synonymous_opportunity_table[codon][position_in_codon]/3.0
+                    sites_synon_status_all.append(codon_synonymous_opportunity_table[codon][position_in_codon])
+                    sites_position_in_fasta_all.append(min_position_g + position_in_gene)
+
+
+            # the positions of each fasta position in the current block
+            sites_position_in_block_all = [loc.find_position(strain=genome_name_i_j, pos=h)[1] for h in sites_position_in_fasta_all]
+            # the positions and allele of each mutation in the current block that are in CDS regions
+            #block_i_mutate_genome_j_in_cds = [x for x in block_i_mutate_genome_j if x[0] in sites_position_in_block_all ]
+
+            #sites_synon_status_all[sites_position_in_block_all.index(s)]
+
+            #print(min(sites_position_in_block_all))
+
+            # no mutations in CDS regions! skip.
+            #if len(block_i_mutate_genome_j_in_cds) == 0:
+            #    continue
+
+            # no CDS in the block! skip.
+            if len(sites_position_in_block_all) == 0:
+                continue
+
+            # splitting positions and allele
+            #block_i_mutate_genome_j_in_cds_block_positions = [x[0] for x in block_i_mutate_genome_j_in_cds]
+            #block_i_mutate_genome_j_in_cds_block_alleles = [x[1] for x in block_i_mutate_genome_j_in_cds]
+            
+            # the position of each mutation in the fasta file
+            #block_i_mutate_genome_j_in_cds_fasta_positions = [sites_position_in_fasta_all[sites_position_in_block_all.index(s)] for s in block_i_mutate_genome_j_in_cds_block_positions]
+            #block_i_mutate_genome_j_in_cds_syn_status = [sites_synon_status_all[sites_position_in_block_all.index(s)] for s in block_i_mutate_genome_j_in_cds_block_positions]
+            
+            # sites_synon_status has the positions of the sites in the gene with respect to the fasta file
+            syn_sites_dict[block_i_id]['data']['n_sites'] = {}
+            # sites_synon_status_all
+            sites_synon_status_all = numpy.asarray(sites_synon_status_all)
+            # count number of sites in block for each fourfold status
+            for fourfold_status in range(4):
+                syn_sites_dict[block_i_id]['data']['n_sites'][fourfold_status] = sum(sites_synon_status_all == fourfold_status)
+            
+
+            #syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j] = {}
+            #syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j]['mutate_block_position'] = block_i_mutate_genome_j_in_cds_block_positions
+            #syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j]['mutate_allele'] = block_i_mutate_genome_j_in_cds_block_alleles
+            #syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j]['mutate_fasta_position'] = block_i_mutate_genome_j_in_cds_fasta_positions
+            #syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j]['mutate_syn_status'] = block_i_mutate_genome_j_in_cds_syn_status
+
+            syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j] = {}
+            syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j]['site_block_position'] = sites_position_in_block_all
+            syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j]['site_fasta_position'] = sites_position_in_fasta_all
+            syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j]['site_syn_status'] = sites_synon_status_all
+
+
+            # strand of the block on the fasta file
+            syn_sites_dict[block_i_id]['data']['genomes'][genome_name_i_j]['strand'] = strand_i_j
+
+
+
+    # save dictionary
+    sys.stderr.write("Saving dictionary...\n")
+    with open(syn_sites_dict_path % votu, 'wb') as handle:
+        pickle.dump(syn_sites_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    sys.stderr.write("Done!\n")
+
+
+
+def computed_poisson_thinning(diffs, opportunities):
+    # apply this to calculation of all dN/dS
+    # specifically when calculating dS
+    thinned_diffs_1 = numpy.random.binomial(diffs, 0.5)
+    thinned_diffs_2 = diffs - thinned_diffs_1
+    d1 = thinned_diffs_1 / (opportunities.astype(float) / 2)
+    d2 = thinned_diffs_2 / (opportunities.astype(float) / 2)
+    return d1, d2
 
 
 
