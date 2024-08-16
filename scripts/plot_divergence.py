@@ -8,6 +8,7 @@ import numpy
 import sys
 import pickle
 import time
+import operator
 #import logger
 
 
@@ -22,6 +23,9 @@ from numpy.random import normal
 import matplotlib as mpl
 import pylab
 
+from matplotlib.patches import Patch
+
+
 import multiprocessing
 
 
@@ -34,6 +38,7 @@ random.seed(123456789)
 votu_dict, vgenome_dict = data_utils.read_uhgv_metadata()
 uhgv_votu_metadata_dict = data_utils.read_uhgv_votu_metadata()
 sample_metagenome_dict = data_utils.read_sample_metadata()
+mgv_uhgv_species_dict = data_utils.parse_mgv_uhgv_species()
 
 
 #file_directory = '%scomplete_minimap2/' % config.data_directory
@@ -183,7 +188,6 @@ def plot_divergence_vs_shared_blocks(votu, syn_divergence=True, min_n_muts=30, m
     div_dict = pickle.load(open(div_dict_path, "rb"))
     genome_pairs = list(div_dict.keys())
     lifestyle_votu = uhgv_votu_metadata_dict[votu]['lifestyle']
-
 
     divergence_all = []
     len_fraction_shared_blocks_all = []
@@ -683,6 +687,536 @@ def multiprocessing_calculate_divergence(votu, n_pairs):
 
 
 
+def plot_divergence_with_temperate_score(min_n_muts=30, min_n_sites=1e3, rescaled_log=True):
+
+    rescaled_log_label = {True:'_rescaled_log', False:''}
+
+    votu_all = [filename.split('.')[0] for filename in os.listdir(config.data_directory + 'divergence_dict_all/')]
+    
+    from matplotlib import cm
+    
+
+    votu_to_ignore = ['vOTU-000118', 'vOTU-003790', 'vOTU-000035', 'vOTU-000016']
+    votu_all = [v for v in votu_all if v not in votu_to_ignore]
+    #scores = [mgv_uhgv_species_dict[v]['avg_temperate_complete'] for v in votu_all]
+
+    if rescaled_log == True:
+        ds_range = numpy.linspace(-2, 2, num=100, endpoint=True)
+        dnds_range = numpy.linspace(-2, 2, num=100, endpoint=True)
+
+
+    else:
+
+        ds_range = numpy.logspace(-3, 0, num=100, endpoint=True, base=10.0)
+        dnds_range = numpy.logspace(-1, 1, num=100, endpoint=True, base=10.0)
+
+
+    fig = plt.figure(figsize = (12, 8))
+    fig.subplots_adjust(bottom= 0.15)
+
+    ax_ds_lifestyle = plt.subplot2grid((2, 2), (0, 0), colspan=1)
+    ax_dnds_lifestyle = plt.subplot2grid((2, 2), (1, 0), colspan=1)
+
+    ax_ds_score = plt.subplot2grid((2, 2), (0, 1), colspan=1)
+    ax_dnds_score = plt.subplot2grid((2, 2), (1, 1), colspan=1)
+
+    for votu in votu_all:
+
+        votu_score = float(mgv_uhgv_species_dict[votu]['avg_temperate_complete'])
+
+        lifestyle = uhgv_votu_metadata_dict[votu]['lifestyle']
+        lifestyle_color = data_utils.lifestyle_color_dict[lifestyle]
+   
+        if votu_score < 0:
+            continue
+
+        div_dict_path = '%sdivergence_dict_all/%s.pickle' % (config.data_directory, votu)
+        div_dict = pickle.load(open(div_dict_path, "rb"))
+        genome_pairs = list(div_dict.keys())
+
+        ds_all = []
+        dnds_all = []
+        
+        for genome_pair_idx, genome_pair in enumerate(genome_pairs):
+
+            cumulative_n_syn = div_dict[genome_pair]['cumulative_n_syn']
+            cumulative_n_nonsyn = div_dict[genome_pair]['cumulative_n_nonsyn']
+
+            cumulative_block_len_syn = div_dict[genome_pair]['cumulative_block_len_syn']
+            cumulative_block_len_nonsyn = div_dict[genome_pair]['cumulative_block_len_nonsyn']
+
+            if (cumulative_n_syn == None) or (cumulative_n_nonsyn == None) or (cumulative_block_len_syn == None) or (cumulative_block_len_nonsyn == None):
+                continue
+
+            # at least one mutation in each 
+            if (cumulative_n_syn == 0) or (cumulative_n_nonsyn == 0):
+                continue
+            
+            # total of five mutations
+            if (cumulative_n_syn + cumulative_n_nonsyn) <= min_n_muts:
+                continue
+
+            # at least min_n_sites possible sites
+            if (cumulative_block_len_syn < min_n_sites) or (cumulative_block_len_nonsyn < min_n_sites):
+                continue
+
+            ds = cumulative_n_syn/cumulative_block_len_syn
+            dn = cumulative_n_nonsyn/cumulative_block_len_nonsyn
+
+            ds_all.append(ds)
+            dnds_all.append(dn/ds)
+
+
+        ds_all = numpy.asarray(ds_all)
+        dnds_all = numpy.asarray(dnds_all)
+        
+        if rescaled_log == True:
+
+            ds_all = numpy.log10(ds_all)
+            dnds_all = numpy.log10(dnds_all)
+
+            ds_all = (ds_all - numpy.mean(ds_all))/numpy.std(ds_all)
+            dnds_all = (dnds_all - numpy.mean(dnds_all))/numpy.std(dnds_all)
+
+        
+        survival_ds = data_utils.make_survival_dist(ds_all, ds_range)
+        survival_dnds = data_utils.make_survival_dist(dnds_all, dnds_range)
+
+        
+        rgb_ = cm.Reds(votu_score)
+    
+        ax_ds_lifestyle.plot(ds_range, survival_ds, lw=1, ls='-', c=lifestyle_color, alpha=0.5)
+        ax_dnds_lifestyle.plot(dnds_range, survival_dnds, lw=1, ls='-', c=lifestyle_color, alpha=0.5)
+
+        #ax_ds_lifestyle.plot(ds_range, survival_ds, lw=2, ls='-', c=data_utils.lifestyle_color_dict['temperate'], alpha=0.6)
+        #ax_dnds_lifestyle.plot(dnds_range, survival_dnds, lw=2, ls='-', c=data_utils.lifestyle_color_dict['temperate'], alpha=0.6)
+
+        ax_ds_score.plot(ds_range, survival_ds, lw=1, ls='-', c=rgb_, alpha=0.5)
+        ax_dnds_score.plot(dnds_range, survival_dnds, lw=1, ls='-', c=rgb_, alpha=0.5)
+
+
+
+    if rescaled_log == True:
+
+        syn_div_label = 'Rescaled log of synonymous divergence, ' + r'$d_{S}$'
+        nonsyn_div_label = 'Rescaled log of nonsynonymous divergence, ' + r'$d_{N}/d_{S}$'
+
+
+    else:
+        syn_div_label = 'Synonymous divergence, ' + r'$d_{S}$'
+        nonsyn_div_label = 'Nonsynonymous divergence, ' + r'$d_{N}/d_{S}$'
+
+        ax_ds_lifestyle.set_xscale('log', base=10)
+        ax_dnds_lifestyle.set_xscale('log', base=10)
+        ax_ds_score.set_xscale('log', base=10)
+        ax_dnds_score.set_xscale('log', base=10)
+
+
+    syn_div_survival_label = "Fraction of pairs " + r'$\geq d_{S}$'
+    nonsyn_div_survival_label = "Fraction of pairs " + r'$\geq d_{N}/d_{S}$'
+
+
+    ax_ds_lifestyle.set_xlabel(syn_div_label, fontsize=10)
+    ax_ds_lifestyle.set_ylabel(syn_div_survival_label, fontsize=10)
+
+    ax_dnds_lifestyle.set_xlabel(nonsyn_div_label, fontsize=10)
+    ax_dnds_lifestyle.set_ylabel(nonsyn_div_survival_label, fontsize=10)
+
+    ax_ds_score.set_xlabel(syn_div_label, fontsize=10)
+    ax_ds_score.set_ylabel(syn_div_survival_label, fontsize=10)
+
+    ax_dnds_score.set_xlabel(nonsyn_div_label, fontsize=10)
+    ax_dnds_score.set_ylabel(nonsyn_div_survival_label, fontsize=10)
+
+
+    ax_ds_lifestyle.set_title('Lifestyle', fontsize=12)
+    ax_ds_score.set_title('avg_temperate_complete score', fontsize=12)
+
+    
+    legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor=data_utils.lifestyle_color_dict['lytic'], label='Lytic', markersize=15),
+                       Line2D([0], [0], marker='o', color='w', markerfacecolor=data_utils.lifestyle_color_dict['temperate'], label='Temperate', markersize=15)]
+
+    #ax_ds_lifestyle.legend(handles=legend_elements, loc='upper right')
+    
+
+
+    #cb_ax = fig.add_axes([.91,.14,.025,.70])
+    #fig.colorbar(ax_ds, orientation='horizontal',cax=ax_ds)
+    ##cb_ax.tick_params(labelsize=7)
+    #cb_ax.set_ylabel('Mean Jaccard distance', rotation=270, labelpad=12)
+
+    fig.subplots_adjust(hspace=0.3, wspace=0.25)
+    fig_name = "%sdivergence_with_temperate_score%s.png" % (config.analysis_directory, rescaled_log_label[rescaled_log])
+    fig.savefig(fig_name, format='png', bbox_inches = "tight", pad_inches = 0.3, dpi = 600)
+    plt.close()
+
+
+
+
+def plot_dnds_vs_shared_blocks(votu, min_n_muts=50, min_n_sites=1e3, n_bins=30):
+
+    div_dict_path = '%sdivergence_dict_all/%s.pickle' % (config.data_directory, votu)
+    div_dict = pickle.load(open(div_dict_path, "rb"))
+    
+    cumulative_n_syn_all = []
+    cumulative_n_nonsyn_all = []
+    cumulative_block_len_syn_all = []
+    cumulative_block_len_nonsyn_all = []
+    genome_pairs_clean_all = []
+
+    len_fraction_shared_blocks_all = []
+
+    for genome_pair, genome_pair_dict in div_dict.items():
+
+        cumulative_n_syn = genome_pair_dict['cumulative_n_syn']
+        cumulative_n_nonsyn = genome_pair_dict['cumulative_n_nonsyn']
+
+        cumulative_block_len_syn = genome_pair_dict['cumulative_block_len_syn']
+        cumulative_block_len_nonsyn = genome_pair_dict['cumulative_block_len_nonsyn']
+
+        if (cumulative_n_syn == None) or (cumulative_n_nonsyn == None) or (cumulative_block_len_syn == None) or (cumulative_block_len_nonsyn == None):
+            continue
+
+        # at least one mutation in each 
+        if (cumulative_n_syn == 0) or (cumulative_n_nonsyn == 0):
+            continue
+        
+        # total of five mutations
+        if (cumulative_n_syn + cumulative_n_nonsyn) <= min_n_muts:
+            continue
+
+        # at least min_n_sites possible sites
+        if (cumulative_block_len_syn < min_n_sites) or (cumulative_block_len_nonsyn < min_n_sites):
+            continue
+
+        cumulative_n_syn_all.append(cumulative_n_syn)
+        cumulative_n_nonsyn_all.append(cumulative_n_nonsyn)
+        cumulative_block_len_syn_all.append(cumulative_block_len_syn)
+        cumulative_block_len_nonsyn_all.append(cumulative_block_len_nonsyn)
+        genome_pairs_clean_all.append(genome_pair)
+
+        len_fraction_shared_blocks_all.append(div_dict[genome_pair]['len_fraction_shared_blocks_union'])
+
+
+
+    cumulative_n_syn_all = numpy.asarray(cumulative_n_syn_all)
+    cumulative_n_nonsyn_all = numpy.asarray(cumulative_n_nonsyn_all)
+    cumulative_block_len_syn_all = numpy.asarray(cumulative_block_len_syn_all)
+    cumulative_block_len_nonsyn_all = numpy.asarray(cumulative_block_len_nonsyn_all)
+    
+    ds_all = cumulative_n_syn_all/cumulative_block_len_syn_all
+    dn_all = cumulative_n_nonsyn_all/cumulative_block_len_nonsyn_all
+    dnds_all = dn_all/ds_all
+
+
+    len_fraction_shared_blocks_all = numpy.asarray(len_fraction_shared_blocks_all)
+
+
+    #ds_all_log10 = numpy.log10(ds_all)
+    #dnds_all_log10 = numpy.log10(dnds_all)
+
+
+    pylab.figure(figsize=(5,4))
+    fig = pylab.gcf()
+    outer_grid  = gridspec.GridSpec(2,2, height_ratios=[2,8], width_ratios=[8,2], hspace=0.1, wspace=0.1)
+
+    dnds_hist_axis = plt.Subplot(fig, outer_grid[0,0])
+    fig.add_subplot(dnds_hist_axis)
+    length_hist_axis = plt.Subplot(fig, outer_grid[1,1])
+    fig.add_subplot(length_hist_axis)
+
+    scatter_axis = plt.Subplot(fig, outer_grid[1,0])
+    fig.add_subplot(scatter_axis)
+
+
+    same_country_idx = [True if sample_metagenome_dict[vgenome_dict[k[0]]['original_id']]['country_code'] == sample_metagenome_dict[vgenome_dict[k[1]]['original_id']]['country_code'] else False for k in genome_pairs_clean_all]
+    same_continent_idx = [True if sample_metagenome_dict[vgenome_dict[k[0]]['original_id']]['continent'] == sample_metagenome_dict[vgenome_dict[k[1]]['original_id']]['continent'] else False for k in genome_pairs_clean_all]
+
+    same_country_idx = numpy.asarray(same_country_idx)
+    same_continent_idx = numpy.asarray(same_continent_idx)
+
+    same_continent_diff_country = (same_continent_idx) & (~same_country_idx)
+    same_continent_same_country = (same_continent_idx) & (same_country_idx)
+
+
+    to_plot_idx = numpy.asarray([True]*len(dnds_all))
+
+    same_continent_idx_scatter = same_continent_idx[to_plot_idx]
+    same_continent_diff_country_scatter = same_continent_diff_country[to_plot_idx]
+    same_continent_same_country_scatter = same_continent_same_country[to_plot_idx]
+
+
+    scatter_axis.scatter(dnds_all[~same_continent_idx_scatter], len_fraction_shared_blocks_all[~same_continent_idx_scatter], s=8, c='#FF6347', alpha=0.3, label='Diff. continent')
+    scatter_axis.scatter(dnds_all[same_continent_diff_country_scatter], len_fraction_shared_blocks_all[same_continent_diff_country_scatter], s=8, c='#FFA500', alpha=0.3, label='Same continent, diff. country')
+    scatter_axis.scatter(dnds_all[same_continent_same_country_scatter], len_fraction_shared_blocks_all[same_continent_same_country_scatter], s=8, c='#87CEEB', alpha=0.3, label='Same country')
+    
+
+    dnds_bins_log10 = numpy.logspace(min(numpy.log10(dnds_all)), max(numpy.log10(dnds_all)), n_bins, base=10)
+    length_bins = numpy.linspace(min(len_fraction_shared_blocks_all), 1, n_bins)
+
+    dnds_hist_axis.hist(dnds_all[~same_continent_idx], bins=dnds_bins_log10 , histtype='step', density=False, weights=numpy.ones(len(ds_all[~same_continent_idx])) / len(ds_all[~same_continent_idx]), color='#FF6347')
+    dnds_hist_axis.hist(dnds_all[same_continent_diff_country], bins=dnds_bins_log10, histtype='step', density=False, weights=numpy.ones(len(ds_all[same_continent_diff_country])) / len(ds_all[same_continent_diff_country]), color='#FFA500')
+    dnds_hist_axis.hist(dnds_all[same_continent_same_country], bins=dnds_bins_log10, histtype='step', density=False, weights=numpy.ones(len(ds_all[same_continent_same_country])) / len(ds_all[same_continent_same_country]), color='#87CEEB')
+
+    length_hist_axis.hist(len_fraction_shared_blocks_all[~same_continent_idx], bins=length_bins, histtype='step', density=False, weights=numpy.ones(len(dnds_all[~same_continent_idx])) / len(dnds_all[~same_continent_idx]), orientation='horizontal', color='#FF6347')
+    length_hist_axis.hist(len_fraction_shared_blocks_all[same_continent_diff_country], bins=length_bins, histtype='step', density=False, weights=numpy.ones(len(dnds_all[same_continent_diff_country])) / len(dnds_all[same_continent_diff_country]), orientation='horizontal', color='#FFA500')
+    length_hist_axis.hist(len_fraction_shared_blocks_all[same_continent_same_country], bins=length_bins, histtype='step', density=False, weights=numpy.ones(len(dnds_all[same_continent_same_country])) / len(dnds_all[same_continent_same_country]), orientation='horizontal', color='#87CEEB')
+
+    dnds_hist_axis.set_xlim([dnds_bins_log10[0], dnds_bins_log10[-1]])
+
+    #d s_hist_axis.set_xlim([ds_bins[0],ds_bins[-1]])
+    length_hist_axis.set_ylim([length_bins[0],length_bins[-1]])
+    
+    scatter_axis.set_xlim([dnds_bins_log10[0], dnds_bins_log10[-1]])
+    scatter_axis.set_ylim([length_bins[0], length_bins[-1]])
+
+
+    #scatter_axis_xticks = scatter_axis.get_xticks()
+    #print(scatter_axis_xticks)
+    scatter_axis.axvline(x=1, c='k', ls=':', lw=1, label='Neutral')
+    dnds_hist_axis.axvline(x=1, c='k', ls=':', lw=1)
+
+
+    scatter_axis.set_xscale('log', base=10)
+    #scatter_axis.set_yscale('log', base=10)
+
+    dnds_hist_axis.set_xscale('log', base=10)
+    #length_hist_axis.set_yscale('log', base=10)
+    
+    scatter_axis.set_xlabel('Nonsynonymous ratio, ' + r'$d_{N}/d_{S}$', fontsize=10)
+    scatter_axis.set_ylabel('Length fraction of shared blocks', fontsize=10)
+    dnds_hist_axis.set_title('%s\nLifestyle = %s' % (votu, uhgv_votu_metadata_dict[votu]['lifestyle']), fontsize=12)
+
+
+    length_hist_axis.set_yticklabels([])
+    length_hist_axis.set_xticks([])
+    dnds_hist_axis.set_xticklabels([])
+    dnds_hist_axis.set_yticks([])
+
+    scatter_axis.legend(loc='upper left',frameon=True, fontsize=6)
+    fig_name = "%sdnds_vs_shared_blocks/%s.png" % (config.analysis_directory, votu)
+    fig.savefig(fig_name, bbox_inches='tight', format='png', pad_inches = 0.3, dpi = 600)
+    plt.close()
+
+
+
+    
+def plot_divergence_along_genome(votu, genome_1, genome_2, min_n_muts=300, min_n_sites=2e3):
+
+    def find_possible_pairs():
+
+        div_dict_path = '%sdivergence_dict_all/%s.pickle' % (config.data_directory, votu)
+        div_dict = pickle.load(open(div_dict_path, "rb"))
+
+        cumulative_n_syn_all = []
+        cumulative_n_nonsyn_all = []
+        cumulative_block_len_syn_all = []
+        cumulative_block_len_nonsyn_all = []
+        genome_pairs_clean_all = []
+
+        for genome_pair, genome_pair_dict in div_dict.items():
+
+            cumulative_n_syn = genome_pair_dict['cumulative_n_syn']
+            cumulative_n_nonsyn = genome_pair_dict['cumulative_n_nonsyn']
+
+            cumulative_block_len_syn = genome_pair_dict['cumulative_block_len_syn']
+            cumulative_block_len_nonsyn = genome_pair_dict['cumulative_block_len_nonsyn']
+
+            if (cumulative_n_syn == None) or (cumulative_n_nonsyn == None) or (cumulative_block_len_syn == None) or (cumulative_block_len_nonsyn == None):
+                    continue
+
+            # at least one mutation in each 
+            if (cumulative_n_syn == 0) or (cumulative_n_nonsyn == 0):
+                continue
+            
+            # total of five mutations
+            if (cumulative_n_syn + cumulative_n_nonsyn) <= min_n_muts:
+                continue
+
+            # at least min_n_sites possible sites
+            if (cumulative_block_len_syn < min_n_sites) or (cumulative_block_len_nonsyn < min_n_sites):
+                continue
+
+            cumulative_n_syn_all.append(cumulative_n_syn)
+            cumulative_n_nonsyn_all.append(cumulative_n_nonsyn)
+            cumulative_block_len_syn_all.append(cumulative_block_len_syn)
+            cumulative_block_len_nonsyn_all.append(cumulative_block_len_nonsyn)
+            genome_pairs_clean_all.append(genome_pair)
+
+
+        cumulative_n_syn_all = numpy.asarray(cumulative_n_syn_all)
+        cumulative_n_nonsyn_all = numpy.asarray(cumulative_n_nonsyn_all)
+        cumulative_block_len_syn_all = numpy.asarray(cumulative_block_len_syn_all)
+        cumulative_block_len_nonsyn_all = numpy.asarray(cumulative_block_len_nonsyn_all)
+        
+        ds_all = cumulative_n_syn_all/cumulative_block_len_syn_all
+        dn_all = cumulative_n_nonsyn_all/cumulative_block_len_nonsyn_all
+        dnds_all = dn_all/ds_all
+
+        same_country_idx = [True if sample_metagenome_dict[vgenome_dict[k[0]]['original_id']]['country_code'] == sample_metagenome_dict[vgenome_dict[k[1]]['original_id']]['country_code'] else False for k in genome_pairs_clean_all]
+        same_continent_idx = [True if sample_metagenome_dict[vgenome_dict[k[0]]['original_id']]['continent'] == sample_metagenome_dict[vgenome_dict[k[1]]['original_id']]['continent'] else False for k in genome_pairs_clean_all]
+
+        same_country_idx = numpy.asarray(same_country_idx)
+        same_continent_idx = numpy.asarray(same_continent_idx)
+
+        same_continent_diff_country = (same_continent_idx) & (~same_country_idx)
+        #same_continent_same_country = (same_continent_idx) & (same_country_idx)
+        
+        boundary_ds = 0.02
+        boundary_dnds = 1
+        left_block = (ds_all < boundary_ds) & (dnds_all > boundary_dnds)
+        right_block = (ds_all > boundary_ds) & (dnds_all < boundary_dnds)
+
+        left_possible_pairs = numpy.where((same_continent_diff_country & left_block) == True)[0]
+        right_possible_pairs = numpy.where((same_continent_diff_country & right_block) == True)[0]
+
+
+        left_pair = genome_pairs_clean_all[left_possible_pairs[10]]
+        right_pair = genome_pairs_clean_all[right_possible_pairs[10]]
+
+        return left_pair, right_pair
+
+
+    left_pair, right_pair = find_possible_pairs()
+
+
+    # checking if it is a file
+    pangraph_data = data_utils.load_pangraph_data(minimap_path % votu)
+    syn_sites_dict = pickle.load(open(syn_sites_path_template % votu, "rb"))
+
+    mut_position_syn_left, mut_position_nonsyn_left, block_position_syn_left, block_position_nonsyn_left, block_inter_id_left, block_position_dict_left = data_utils.calculate_annotated_divergence_across_pangraph_blocks(left_pair[0], left_pair[1], pangraph_data, syn_sites_dict=syn_sites_dict)
+    mut_position_syn_right, mut_position_nonsyn_right, block_position_syn_right, block_position_nonsyn_right, block_inter_id_right, block_position_dict_right = data_utils.calculate_annotated_divergence_across_pangraph_blocks(right_pair[0], right_pair[1], pangraph_data, syn_sites_dict=syn_sites_dict)
+
+    # blocks shared by both comparisons
+    inter_block = numpy.intersect1d(block_inter_id_left, block_inter_id_right)
+    
+    # sort blocks by position
+    #start_block = [(b, block_inter_id_left[b][0]) for b in inter_block]
+    #start_block = list(sorted(start_block, key=operator.itemgetter(1)))
+
+    #n_sites_per_window = 500
+    #n_
+    # get sites for all 
+    #inter_block_all_sites = []
+    #for s in inter_block:
+    #    inter_block_all_sites.extend(list(range( block_position_dict_left[s][0],  block_position_dict_left[s][1])))
+    #inter_block_all_sites.sort()
+    #inter_block_all_sites = numpy.asarray(inter_block_all_sites)
+    
+    n_sites_per_window = 1000
+    #n_windows = int(len(inter_block_all_sites)/n_sites_per_window)
+
+    #min_len_left = min([min(block_position_syn_left), min(block_position_nonsyn_left)])
+    #max_len_left = max([max(block_position_syn_left), max(block_position_nonsyn_left)])
+
+    all_bins_left = list(range(min([min(block_position_syn_left), min(block_position_nonsyn_left)]), max([max(block_position_syn_left), max(block_position_nonsyn_left)])+1, n_sites_per_window))
+    all_bins_right = list(range(min([min(block_position_syn_right), min(block_position_nonsyn_right)]), max([max(block_position_syn_right), max(block_position_nonsyn_right)])+1, n_sites_per_window))
+
+    ds_left = []
+    dn_left = []
+    for i in range(len(all_bins_left)-1):
+
+        n_muts_syn_i = sum((mut_position_syn_left >= all_bins_left[i]) & (mut_position_syn_left < all_bins_left[i+1]))
+        n_sites_syn_i = sum((block_position_syn_left >= all_bins_left[i]) & (block_position_syn_left < all_bins_left[i+1]))
+
+        n_muts_nonsyn_i = sum((mut_position_nonsyn_left >= all_bins_left[i]) & (mut_position_nonsyn_left < all_bins_left[i+1]))
+        n_sites_nonsyn_i = sum((block_position_nonsyn_left >= all_bins_left[i]) & (block_position_nonsyn_left < all_bins_left[i+1]))
+
+        ds_left.append(n_muts_syn_i/n_sites_syn_i)
+        dn_left.append(n_muts_nonsyn_i/n_sites_nonsyn_i)
+
+
+    ds_right = []
+    dn_right = []
+    for i in range(len(all_bins_left)-1):
+
+        n_muts_syn_i = sum((mut_position_syn_right >= all_bins_right[i]) & (mut_position_syn_right < all_bins_right[i+1]))
+        n_sites_syn_i = sum((block_position_syn_right >= all_bins_right[i]) & (block_position_syn_right < all_bins_right[i+1]))
+
+        n_muts_nonsyn_i = sum((mut_position_nonsyn_right >= all_bins_right[i]) & (mut_position_nonsyn_right < all_bins_right[i+1]))
+        n_sites_nonsyn_i = sum((block_position_nonsyn_right >= all_bins_right[i]) & (block_position_nonsyn_right < all_bins_right[i+1]))
+
+        ds_right.append(n_muts_syn_i/n_sites_syn_i)
+        dn_right.append(n_muts_nonsyn_i/n_sites_nonsyn_i)
+
+    #ds_left = [sum((mut_position_syn_left >= all_bins_left[i]) & (mut_position_syn_left < all_bins_left[i+1])) for i in range(len(all_bins_left)-1)]
+
+    all_bins_left = numpy.asarray(all_bins_left)
+    all_bins_right = numpy.asarray(all_bins_right)
+
+    all_bins_left_midpoint = all_bins_left*0.5
+    all_bins_right_midpoint = all_bins_right*0.5
+
+
+    ds_left = numpy.asarray(ds_left)
+    dn_left = numpy.asarray(dn_left)
+
+    ds_right = numpy.asarray(ds_right)
+    dn_right = numpy.asarray(dn_right)
+
+    dnds_left = dn_left/ds_left
+    dnds_right = dn_right/ds_right
+
+
+    fig = plt.figure(figsize = (6, 8))
+    fig.subplots_adjust(bottom= 0.15)
+
+    ax_ds = plt.subplot2grid((2, 1), (0, 0), colspan=1)
+    ax_dn = plt.subplot2grid((2, 1), (1, 0), colspan=1)
+
+    ds_left_idx = (~numpy.isnan(ds_left)) & (ds_left>0)
+    ds_right_idx = (~numpy.isnan(ds_right)) & (ds_right>0)
+
+    dnds_left_idx = (~numpy.isnan(dnds_left)) & (dnds_left>0)
+    dnds_right_idx = (~numpy.isnan(dnds_right)) & (dnds_right>0)
+
+    # plot shaded regions for shared blocks
+
+    for i in inter_block:
+        ax_ds.axvspan(block_position_dict_left[i][0], block_position_dict_left[i][1], facecolor='mediumpurple', alpha=0.3)
+        ax_dn.axvspan(block_position_dict_left[i][0], block_position_dict_left[i][1], facecolor='mediumpurple', alpha=0.3)
+
+    
+    ax_ds.scatter(all_bins_left[:-1][ds_left_idx], ds_left[ds_left_idx], s=10, c=data_utils.lifestyle_color_dict['lytic'], zorder=2)
+    ax_ds.scatter(all_bins_right[:-1][ds_right_idx], ds_right[ds_right_idx], s=10, c=data_utils.lifestyle_color_dict['temperate'], zorder=2)
+
+
+    ax_dn.scatter(all_bins_left[:-1][dnds_left_idx], dnds_left[dnds_left_idx], s=14, c=data_utils.lifestyle_color_dict['lytic'], zorder=2)
+    ax_dn.scatter(all_bins_right[:-1][dnds_right_idx], dnds_right[dnds_right_idx], s=14, c=data_utils.lifestyle_color_dict['temperate'], zorder=2)
+
+    
+    ax_ds.set_yscale('log', base=10)
+    ax_dn.set_yscale('log', base=10)
+
+    ax_ds.set_xlabel("Cumulative pangraph block position", fontsize=10)
+    ax_dn.set_xlabel("Cumulative pangraph block position", fontsize=10)
+    
+
+    ax_ds.set_ylabel('Synonymous divergence, ' + r'$d_{S}$', fontsize=10)
+    ax_dn.set_ylabel('Nonsynonymous ratio, ' + r'$d_{N}/d_{S}$', fontsize=10)
+ 
+    
+
+    legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor=data_utils.lifestyle_color_dict['lytic'], label='Upper-left quadrant', markersize=12),
+                       Line2D([0], [0], marker='o', color='w', markerfacecolor=data_utils.lifestyle_color_dict['temperate'], label='Lower-right quadrant', markersize=12),
+                       Patch(facecolor='mediumpurple', edgecolor='mediumpurple', label='Block present in both pairs')]
+
+
+    ax_ds.legend(handles=legend_elements, loc='upper left', fontsize=8)
+
+    ax_dn.axhline(y=1, c='k', lw=1.5, ls=':')
+
+
+    #scatter_axis.legend(loc='upper left',frameon=True, fontsize=6)
+    fig_name = "%sdivergence_comparison.png" % config.analysis_directory
+    fig.savefig(fig_name, bbox_inches='tight', format='png', pad_inches = 0.3, dpi = 600)
+    plt.close()
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
@@ -691,52 +1225,40 @@ if __name__ == "__main__":
     # 300*299/2
     n_pairs=44850
 
-    for filename in os.listdir(config.data_directory + 'divergence_dict_all/'):
-        
-        votu = filename.split('.')[0]
+    #plot_shared_blocks_dist()
 
-        if votu in votu_to_ignore:
-            continue
+    #plot_divergence_with_temperate_score()
+
+    #plot_divergence_with_temperate_score(rescaled_log=True)
+
+    #plot_divergence_vs_shared_blocks('vOTU-000002', min_n_muts=50, min_n_sites=1e3)
+
+    plot_divergence_along_genome('vOTU-000002', '1', '2')
+
+
+
+    #for filename in os.listdir(config.data_directory + 'divergence_dict_all/'):
+        
+    #    votu = filename.split('.')[0]
+
+    #    if votu in votu_to_ignore:
+    #        continue
+
+    #    plot_dnds_vs_shared_blocks(votu, min_n_muts=50, min_n_sites=1e3)
 
         #calculate_divergence(votu)
-
-        plot_divergence_vs_shared_blocks(votu, min_n_muts=30, min_n_sites=1e3)
-        plot_ds_vs_dnds_dist_axis(votu, poisson_thinning=True, min_n_muts=50, min_n_sites=1e3)
+        #plot_divergence_vs_shared_blocks(votu, min_n_muts=30, min_n_sites=1e3)
+        #plot_ds_vs_dnds_dist_axis(votu, poisson_thinning=True, min_n_muts=50, min_n_sites=1e3)
 
 
     #multiprocessing_calculate_divergence('vOTU-000001', n_pairs)
 
-    
-    #calculate_divergence('vOTU-000001', n_pairs)
-    #calculate_divergence('vOTU-000132')
-    #calculate_divergence('vOTU-000005')
-    #calculate_divergence('vOTU-000039')
-    #calculate_divergence('vOTU-000008')
-
-    #plot_ds_vs_dnds_dist_axis('vOTU-000002', poisson_thinning=True)
-
-    #plot_divergence_vs_shared_blocks('vOTU-000002')
 
 
 
 
     
 
-    
-
-#plot_ds_vs_dnds_dist_axis('vOTU-000007', poisson_thinning=True)
-#plot_ds_vs_dnds_dist_axis('vOTU-000003', poisson_thinning=True)
-
-
-
-
-    
-
-#plot_divergence_vs_shared_blocks()
-
-#plot_shared_blocks_dist()
-
-\
 
 
 

@@ -529,6 +529,48 @@ def read_uhgv_votu_metadata():
 
 
 
+def parse_mgv_uhgv_species():
+     
+    mgv_uhgv_species_dict = {}
+
+    with open('%smgv_uhgv_species_list.txt' % config.data_directory, 'r') as f:
+
+        header = f.readline()
+        header = header.strip().split('\t')
+
+        for line in f:
+            
+            line = line.strip().split('\t')
+            votu = line[0]
+            
+            mgv_uhgv_species_dict[votu] = {}
+            mgv_uhgv_species_dict[votu]['repgenome'] = line[1]
+            mgv_uhgv_species_dict[votu]['num_genomes'] = line[2]
+            mgv_uhgv_species_dict[votu]['complete'] = line[3]
+            mgv_uhgv_species_dict[votu]['high_quality'] = line[4]
+            mgv_uhgv_species_dict[votu]['medium_quality'] = line[5]
+            mgv_uhgv_species_dict[votu]['order'] = line[6]
+            mgv_uhgv_species_dict[votu]['family'] = line[7]
+            mgv_uhgv_species_dict[votu]['length'] = line[8]
+            mgv_uhgv_species_dict[votu]['prophage_avg'] = line[9]
+            mgv_uhgv_species_dict[votu]['rep_temperate_score'] = line[10]
+            mgv_uhgv_species_dict[votu]['max_temperate_score'] = line[11]
+            mgv_uhgv_species_dict[votu]['avg_temperate_score'] = line[12]
+            mgv_uhgv_species_dict[votu]['avg_temperate_complete'] = line[13]
+            mgv_uhgv_species_dict[votu]['host_lineage'] = line[14]
+
+
+            #print(line[12], line[13])
+            
+            
+    return mgv_uhgv_species_dict
+
+
+
+
+
+
+
 def votu_dict_to_pres_abs(phage_metadata_dict):
 
     #uhgv_votu 
@@ -839,6 +881,145 @@ def get_pangraph_genome_names(pangraph_data):
 
 
 
+def calculate_annotated_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_data, syn_sites_dict, bin_n = 100):
+
+    cumulative_block_len = 0
+
+    # returns a vector of the positions of mutations and the positions of annotated sites 
+    cumulative_mut_position_syn = []
+    cumulative_mut_position_nonsyn = []
+
+    cumulative_block_position_syn = []
+    cumulative_block_position_nonsyn = []
+
+    block_inter_id = []
+    block_position_dict = {}
+
+    # the order of the blocks should be sorted
+    for block_i_idx, block_i in enumerate(pangraph_data['blocks']):
+
+        #if block_i_idx == 1:
+        #    print(block_i['id'])
+        
+        block_i_id = block_i['id']
+        sequence_i = block_i['sequence']
+        # length of the block
+        len_sequence_i = len(sequence_i)
+
+        # save the positions of the block f
+        block_position_dict[block_i_id] = [cumulative_block_len, cumulative_block_len+len_sequence_i]
+
+        block_i_name_genomes = [i[0]['name'] for i in block_i['positions']]
+        # dict_keys(['id', 'sequence', 'gaps', 'mutate', 'insert', 'delete', 'positions'])
+        if (genome_1 in block_i_name_genomes) and (genome_2 in block_i_name_genomes):
+
+            mutatate_1 = [k for k in block_i['mutate'] if k[0]['name'] == genome_1][0]
+            mutatate_2 = [k for k in block_i['mutate'] if k[0]['name'] == genome_2][0]
+
+            
+            # get all sites shared between the two genomes within the block
+            shared_site_dict_i = {}
+
+            # get positions and alleles for each variant in genome_1
+            for mutatate_1_l in mutatate_1[1]:
+                mutatate_1_l_pos, mutatate_1_l_allele = mutatate_1_l
+
+                # the mutation position refers to the position in the block
+                # we should not need to use 'strand' because we have the block positions in syn_sites_dict
+                if mutatate_1_l_pos not in shared_site_dict_i:
+                    shared_site_dict_i[mutatate_1_l_pos] = {}
+
+                shared_site_dict_i[mutatate_1_l_pos]['genome_1'] = mutatate_1_l_allele
+
+
+            for mutatate_2_l in mutatate_2[1]:
+                mutatate_2_l_pos, mutatate_2_l_allele = mutatate_2_l
+
+                if mutatate_2_l_pos not in shared_site_dict_i:
+                    shared_site_dict_i[mutatate_2_l_pos] = {}
+
+                shared_site_dict_i[mutatate_2_l_pos]['genome_2'] = mutatate_2_l_allele
+
+
+            # identify fourfold status of the site in each genome
+            examine_syn_block = False
+            if syn_sites_dict != None: # annotation dict exists
+                if syn_sites_dict[block_i_id]['keep_block'] == True: # blocks that mapped to the fasta
+                    # make sure genome_1 and genome_2 have genes in this same block
+                    if (genome_1 in syn_sites_dict[block_i_id]['data']['genomes']) and (genome_2 in syn_sites_dict[block_i_id]['data']['genomes']):
+
+                        site_block_position_1 = syn_sites_dict[block_i_id]['data']['genomes'][genome_1]['site_block_position']
+                        site_block_position_2 = syn_sites_dict[block_i_id]['data']['genomes'][genome_2]['site_block_position']
+                        site_syn_status_1 = syn_sites_dict[block_i_id]['data']['genomes'][genome_1]['site_syn_status']
+                        site_syn_status_2 = syn_sites_dict[block_i_id]['data']['genomes'][genome_2]['site_syn_status']
+
+                        # find CDS sites shared by genomes in the block
+                        site_block_position_inter = numpy.intersect1d(site_block_position_1, site_block_position_2)
+                        site_syn_status_1_inter = numpy.asarray([site_syn_status_1[numpy.where(site_block_position_1 == x)[0][0]] for x in site_block_position_inter])
+                        site_syn_status_2_inter = numpy.asarray([site_syn_status_2[numpy.where(site_block_position_2 == x)[0][0]] for x in site_block_position_inter])
+
+                        # calculate subset of sites that have the same (non)syn status in both of the genomes
+                        nonsyn_idx = (site_syn_status_1_inter == 0) & (site_syn_status_2_inter == 0)
+                        syn_idx = (site_syn_status_1_inter == 3) & (site_syn_status_2_inter == 3)
+
+                        site_block_position_inter_nonsyn = site_block_position_inter[nonsyn_idx]
+                        site_block_position_inter_syn = site_block_position_inter[syn_idx]
+
+                        # save positions if you are calculating divergence along genome.
+                        cumulative_block_position_nonsyn.extend((cumulative_block_len + site_block_position_inter_nonsyn).tolist())
+                        cumulative_block_position_syn.extend((cumulative_block_len + site_block_position_inter_syn).tolist())
+
+                        # reset
+                        examine_syn_block = True
+
+                        # save the block
+                        block_inter_id.append(block_i_id)
+
+
+            # go back through and identify alleles
+            if examine_syn_block == True:
+                for pos_k, allele_dict_k in shared_site_dict_i.items():
+
+                    # same allele, do not count towards divergence
+                    if ('genome_1' in allele_dict_k) and ('genome_2' in allele_dict_k):
+                        
+                        # same allele, do not count towards divergence
+                        if allele_dict_k['genome_1'] == allele_dict_k['genome_2']:
+                            continue
+    
+                    
+                    if examine_syn_block == True:
+
+                        if pos_k in site_block_position_inter_nonsyn:
+                            # we only calculate divergence on blocks present in both genomes
+                            cumulative_mut_position_nonsyn.append(cumulative_block_len + pos_k)
+
+                        if pos_k in site_block_position_inter_syn:
+                            cumulative_mut_position_syn.append(cumulative_block_len + pos_k)
+
+
+        # add block length
+        cumulative_block_len += len_sequence_i
+
+
+
+    cumulative_mut_position_syn = numpy.asarray(cumulative_mut_position_syn)
+    cumulative_mut_position_nonsyn = numpy.asarray(cumulative_mut_position_nonsyn)
+
+    cumulative_block_position_syn = numpy.asarray(cumulative_block_position_syn)
+    cumulative_block_position_nonsyn = numpy.asarray(cumulative_block_position_nonsyn)
+
+    block_inter_id = numpy.asarray(block_inter_id)
+    
+    return cumulative_mut_position_syn, cumulative_mut_position_nonsyn, cumulative_block_position_syn, cumulative_block_position_nonsyn, block_inter_id, block_position_dict
+
+ 
+
+
+
+
+
+
 def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_data, syn_sites_dict, bin_n = 1000, calculate_binned_divergence=False):
 
     # knit pangraph blocks together along the entire alignment
@@ -848,8 +1029,6 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
     block_id_final = []
     block_position = []
     cumulative_block_position = []
-    allele_all_1 = []
-    allele_all_2 = []
 
     # get all the blocks THEN calculate distance so you can go across blocks..
     cumulative_block_len = 0
@@ -861,13 +1040,11 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
     cumulative_n_syn = 0
     cumulative_n_nonsyn = 0
 
-    #if syn_sites_dict == None:
-    #    fourfold_status_1 = None
-    #    fourfold_status_2 = None
+    cumulative_block_position_syn = []
+    cumulative_block_position_nonsyn = []
 
-    #else:
-    #    fourfold_status_1 = []
-    #    fourfold_status_2 = []    
+    nonsyn_sites = []
+    syn_sites = []
 
 
     # the order of the blocks should be sorted
@@ -903,12 +1080,6 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
             #strand_1 = positions_i[position_1_idx][0]['strand']
             #strand_2 = positions_i[position_2_idx][0]['strand']
 
-            #if (strand_1 == False):
-            #    stop_1, start_1 = start_1, stop_1
-
-            #if (strand_2 == False):   
-            #    stop_2, start_2 = start_2, stop_2
-
             mutatate_1 = [k for k in block_i['mutate'] if k[0]['name'] == genome_1][0]
             mutatate_2 = [k for k in block_i['mutate'] if k[0]['name'] == genome_2][0]
 
@@ -936,11 +1107,6 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
             for mutatate_2_l in mutatate_2[1]:
                 mutatate_2_l_pos, mutatate_2_l_allele = mutatate_2_l
 
-                #if mutatate_2[0]['strand'] == False:
-                #    continue
-                #    mutatate_2_l_pos = len_sequence_i - mutatate_2_l_pos
-
-
                 if mutatate_2_l_pos not in shared_site_dict_i:
                     shared_site_dict_i[mutatate_2_l_pos] = {}
 
@@ -958,7 +1124,6 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
 
 
             # identify fourfold status of the site in each genome
-            
             examine_syn_block = False
             if syn_sites_dict != None: # annotation dict exists
                 if syn_sites_dict[block_i_id]['keep_block'] == True: # blocks that mapped to the fasta
@@ -982,12 +1147,21 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
                         mutate_block_position_inter_nonsyn = mutate_block_position_inter[nonsyn_idx]
                         mutate_block_position_inter_syn = mutate_block_position_inter[syn_idx]
 
-                        cumulative_block_len_nonsyn += sum(nonsyn_idx)
-                        cumulative_block_len_syn += sum(syn_idx)
+                        n_sites_nonsyn_block = sum(nonsyn_idx)
+                        n_sites_syn_block = sum(syn_idx)
+                        
+
+                        # save positions if you are calculating divergence along genome.
+                        if calculate_binned_divergence == True:
+                            nonsyn_sites.extend((cumulative_inter_block_len + mutate_block_position_inter_nonsyn).tolist())
+                            syn_sites.extend((cumulative_inter_block_len + mutate_block_position_inter_syn).tolist())
+
+
+                        # save cumulative # sites
+                        cumulative_block_len_nonsyn += n_sites_nonsyn_block
+                        cumulative_block_len_syn += n_sites_syn_block
 
                         examine_syn_block = True
-
-
 
 
             # go back through and identify alleles
@@ -1013,7 +1187,7 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
                     if allele_dict_k['genome_1'] == allele_dict_k['genome_2']:
                         continue
 
-                    # otherwise they have different alleles, which counts as divergence between that pair
+                    
                 
                 #if allele_1 == allele_2:
                 #    continue
@@ -1028,9 +1202,12 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
 
                     if pos_k in mutate_block_position_inter_nonsyn:
                         cumulative_n_nonsyn += 1
+                        # we only calculate divergence on blocks present in both genomes
+                        cumulative_block_position_nonsyn.append(cumulative_inter_block_len + pos_k)
 
                     if pos_k in mutate_block_position_inter_syn:
                         cumulative_n_syn += 1
+                        cumulative_block_position_syn.append(cumulative_inter_block_len + pos_k)
 
 
         cumulative_block_len += len_sequence_i
@@ -1039,6 +1216,8 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
     block_id_final = numpy.asarray(block_id_final)
     block_position = numpy.asarray(block_position)
     cumulative_block_position = numpy.asarray(cumulative_block_position)
+    cumulative_block_position_nonsyn = numpy.asarray(cumulative_block_position_nonsyn)
+    cumulative_block_position_syn = numpy.asarray(cumulative_block_position_syn)
     #allele_all_1 = numpy.asarray(allele_all_1)
     #allele_all_2 = numpy.asarray(allele_all_2)
 
@@ -1051,6 +1230,26 @@ def calculate_divergence_across_pangraph_blocks(genome_1, genome_2, pangraph_dat
 
         binned_divergence = numpy.asarray([sum((cumulative_block_position >= all_bins[i]) & (cumulative_block_position < all_bins[i+1])) for i in range(len(all_bins)-1)])
         binned_divergence = binned_divergence/bin_n
+
+        
+        syn_sites = numpy.asarray(syn_sites)
+        nonsyn_sites = numpy.asarray(nonsyn_sites)
+
+        all_bins_syn_nonsyn = list(range(min(numpy.concatenate((syn_sites, nonsyn_sites), axis=0)), max(numpy.concatenate((syn_sites, nonsyn_sites), axis=0))-1, bin_n))
+        binned_n_mut_syn = numpy.asarray([sum((cumulative_block_position_syn >= all_bins_syn_nonsyn[i]) & (cumulative_block_position_syn < all_bins_syn_nonsyn[i+1])) for i in range(len(all_bins_syn_nonsyn)-1)])
+        binned_n_mut_nonsyn = numpy.asarray([sum((cumulative_block_position_nonsyn >= all_bins_syn_nonsyn[i]) & (cumulative_block_position_nonsyn < all_bins_syn_nonsyn[i+1])) for i in range(len(all_bins_syn_nonsyn)-1)])
+
+        binned_n_sites_syn = numpy.asarray([sum((syn_sites >= all_bins_syn_nonsyn[i]) & (syn_sites < all_bins_syn_nonsyn[i+1])) for i in range(len(all_bins_syn_nonsyn)-1)])
+        binned_n_sites_nonsyn = numpy.asarray([sum((nonsyn_sites >= all_bins_syn_nonsyn[i]) & (nonsyn_sites < all_bins_syn_nonsyn[i+1])) for i in range(len(all_bins_syn_nonsyn)-1)])
+
+
+        #print(max(syn_sites), max(nonsyn_sites))
+
+        #print(cumulative_inter_block_len)
+
+        print(binned_n_mut_nonsyn/binned_n_sites_nonsyn)
+        #print(binned_n_mut_nonsyn, binned_n_sites_nonsyn)
+
 
     else:
         all_bins = None
